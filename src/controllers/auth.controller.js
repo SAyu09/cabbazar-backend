@@ -6,6 +6,7 @@ import catchAsync from '../utils/catchAsync.js';
 import { NotFoundError, BadRequestError, TooManyRequestsError } from '../utils/customError.js';
 import { maskPhoneNumber, maskEmail } from '../utils/helpers.js';
 import logger from '../config/logger.js';
+import { sendOTPNotification } from '../utils/sendOtp.js';
 
 /**
  * @desc    Send OTP to phone number
@@ -13,7 +14,7 @@ import logger from '../config/logger.js';
  * @access  Public
  */
 export const sendOTP = catchAsync(async (req, res) => {
-  const { phoneNumber } = req.body;
+  const { phoneNumber, fcmToken } = req.body;
 
   logger.info('OTP request received', { phoneNumber: maskPhoneNumber(phoneNumber) });
 
@@ -41,8 +42,16 @@ export const sendOTP = catchAsync(async (req, res) => {
   const otp = user.generateOTP();
   await user.save({ validateBeforeSave: false });
 
-  // TODO: In production, send OTP via SMS service (Twilio, AWS SNS, MSG91, etc.)
-  // Example: await sendSMS(phoneNumber, `Your CabBazar OTP is: ${otp}`);
+  // Send notification
+  if (fcmToken) {
+    try {
+      await sendOTPNotification(fcmToken, otp);
+      logger.info('OTP notification sent', { phoneNumber: maskPhoneNumber(phoneNumber) });
+    } catch (error) {
+      logger.error('Failed to send OTP notification', { error: error.message });
+      // Decide if you want to throw an error or just log it
+    }
+  }
   
   logger.info('OTP generated and saved', { 
     phoneNumber: maskPhoneNumber(phoneNumber),
@@ -65,7 +74,6 @@ export const sendOTP = catchAsync(async (req, res) => {
 
   return sendSuccess(res, responseData, 'OTP sent successfully', 200);
 });
-
 /**
  * @desc    Verify OTP and login user
  * @route   POST /api/auth/login
