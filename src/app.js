@@ -9,6 +9,9 @@ import globalErrorHandler from './middleware/error.middleware.js';
 
 // Import routes
 import authRoutes from './routes/auth.routes.js';
+import bookingRoutes from './routes/booking.routes.js';
+import userRoutes from './routes/user.routes.js';
+
 // Add other route imports here as needed
 
 // Initialize Express app
@@ -49,6 +52,8 @@ app.get('/health', (req, res) => {
 
 // API Routes - Version 1
 app.use('/api/auth', authRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/users', userRoutes);
 // Add other v1 routes here
 
 // API Routes - Version 2 (if needed)
