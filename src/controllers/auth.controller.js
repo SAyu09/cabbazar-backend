@@ -361,6 +361,7 @@ export const getUser = catchAsync(async (req, res) => {
     role: req.user.role,
     profilePicture: req.user.profilePicture,
     address: req.user.address,
+    token: req.user.token,
     preferences: req.user.preferences,
     lastLogin: req.user.lastLogin,
     createdAt: req.user.createdAt,
