@@ -196,7 +196,7 @@ router.post('/check-phone', phoneValidation, authController.checkPhoneExists);
  * @access  Private
  * @body    { name: string, email?: string, address?: object, preferences?: object }
  */
-router.post('/register', protect, registerValidation, authController.register);
+router.post('/register', authController.register);
 
 /**
  * @route   GET /api/auth/user
@@ -211,7 +211,7 @@ router.get('/user', protect, authController.getUser);
  * @access  Private
  * @body    { name?: string, email?: string, address?: object, preferences?: object }
  */
-router.put('/profile', protect, updateProfileValidation, authController.updateProfile);
+router.put('/updateProfile', protect, authController.updateProfile);
 
 /**
  * @route   POST /api/auth/logout

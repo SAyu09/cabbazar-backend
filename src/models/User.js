@@ -32,7 +32,6 @@ const userSchema = new mongoose.Schema({
   },
   token: {
     type: String,
-    select: false // Don't return token in queries by default
   },
   isVerified: {
     type: Boolean,

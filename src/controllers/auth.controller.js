@@ -1,6 +1,6 @@
 // src/controllers/auth.controller.js - Complete Authentication Controller
 import User from '../models/User.js';
-import {Otp} from '../models/otp.js';
+import { Otp } from '../models/otp.js';
 import { sendSuccess } from '../utils/response.js';
 import { setTokenCookie, clearTokenCookie } from '../middleware/auth.middleware.js';
 import { catchAsync } from '../utils/catchAsync.js';
@@ -39,20 +39,20 @@ const normalizePhoneNumber = (phone) => {
 export const sendOtp = catchAsync(async (req, res) => {
   const { phoneNumber, fcmToken } = req.body;
 
-  logger.info('OTP request received', { 
-    phoneNumber: maskPhoneNumber(phoneNumber) 
+  logger.info('OTP request received', {
+    phoneNumber: maskPhoneNumber(phoneNumber)
   });
 
   // Check for existing OTP
   const existingOtp = await Otp.findOne({ phoneNumber });
-  
+
   if (existingOtp) {
     // Check rate limiting
     const timeSinceLastRequest = (Date.now() - existingOtp.lastRequestedAt.getTime()) / 1000;
     const waitTime = Math.max(0, OTP_CONFIG.RESEND_TIMEOUT_SECONDS - timeSinceLastRequest);
 
     if (waitTime > 0) {
-      logger.warn('OTP request rate limited', { 
+      logger.warn('OTP request rate limited', {
         phoneNumber: maskPhoneNumber(phoneNumber),
         waitTime: Math.ceil(waitTime)
       });
@@ -78,7 +78,7 @@ export const sendOtp = catchAsync(async (req, res) => {
     lastRequestedAt: new Date()
   });
 
-  logger.info('OTP generated successfully', { 
+  logger.info('OTP generated successfully', {
     phoneNumber: maskPhoneNumber(phoneNumber),
     expiresAt: otp.expiresAt
   });
@@ -87,14 +87,14 @@ export const sendOtp = catchAsync(async (req, res) => {
   if (fcmToken) {
     sendOTPNotification(fcmToken, otpCode)
       .then(() => {
-        logger.info('OTP notification sent successfully', { 
-          phoneNumber: maskPhoneNumber(phoneNumber) 
+        logger.info('OTP notification sent successfully', {
+          phoneNumber: maskPhoneNumber(phoneNumber)
         });
       })
       .catch((error) => {
-        logger.error('Failed to send OTP notification', { 
+        logger.error('Failed to send OTP notification', {
           phoneNumber: maskPhoneNumber(phoneNumber),
-          error: error.message 
+          error: error.message
         });
       });
   }
@@ -123,23 +123,23 @@ export const sendOtp = catchAsync(async (req, res) => {
 export const verifyOtp = catchAsync(async (req, res) => {
   const { phoneNumber, otp } = req.body;
 
-  logger.info('OTP verification attempt', { 
-    phoneNumber: maskPhoneNumber(phoneNumber) 
+  logger.info('OTP verification attempt', {
+    phoneNumber: maskPhoneNumber(phoneNumber)
   });
 
   // Find OTP document
   const otpDoc = await Otp.findOne({ phoneNumber });
 
   if (!otpDoc) {
-    logger.warn('Verification failed - no OTP found', { 
-      phoneNumber: maskPhoneNumber(phoneNumber) 
+    logger.warn('Verification failed - no OTP found', {
+      phoneNumber: maskPhoneNumber(phoneNumber)
     });
     throw new BadRequestError('No OTP found. Please request OTP first.');
   }
 
   // Check if OTP has expired
   if (new Date() > otpDoc.expiresAt) {
-    logger.warn('Verification failed - OTP expired', { 
+    logger.warn('Verification failed - OTP expired', {
       phoneNumber: maskPhoneNumber(phoneNumber),
       expiredAt: otpDoc.expiresAt
     });
@@ -149,7 +149,7 @@ export const verifyOtp = catchAsync(async (req, res) => {
 
   // Check if max attempts already exceeded
   if (otpDoc.attempts >= OTP_CONFIG.MAX_ATTEMPTS) {
-    logger.warn('Verification failed - max attempts exceeded', { 
+    logger.warn('Verification failed - max attempts exceeded', {
       phoneNumber: maskPhoneNumber(phoneNumber),
       attempts: otpDoc.attempts
     });
@@ -164,10 +164,10 @@ export const verifyOtp = catchAsync(async (req, res) => {
     // Increment failed attempts
     otpDoc.attempts += 1;
     const attemptsLeft = OTP_CONFIG.MAX_ATTEMPTS - otpDoc.attempts;
-    
+
     await otpDoc.save();
-    
-    logger.warn('OTP verification failed - incorrect code', { 
+
+    logger.warn('OTP verification failed - incorrect code', {
       phoneNumber: maskPhoneNumber(phoneNumber),
       attempts: otpDoc.attempts,
       attemptsLeft
@@ -187,7 +187,7 @@ export const verifyOtp = catchAsync(async (req, res) => {
   // ✅ OTP verified successfully - Delete OTP document
   await Otp.deleteOne({ phoneNumber });
 
-  logger.info('OTP verified successfully', { 
+  logger.info('OTP verified successfully', {
     phoneNumber: maskPhoneNumber(phoneNumber)
   });
 
@@ -203,7 +203,7 @@ export const verifyOtp = catchAsync(async (req, res) => {
     });
     newUser = true;
 
-    logger.info('New user created', { 
+    logger.info('New user created', {
       userId: user._id,
       phoneNumber: maskPhoneNumber(phoneNumber)
     });
@@ -212,7 +212,7 @@ export const verifyOtp = catchAsync(async (req, res) => {
     user.isVerified = true;
     await user.save();
 
-    logger.info('Existing user verified', { 
+    logger.info('Existing user verified', {
       userId: user._id,
       phoneNumber: maskPhoneNumber(phoneNumber)
     });
@@ -259,55 +259,62 @@ export const verifyOtp = catchAsync(async (req, res) => {
 });
 
 /**
- * @desc    Register/Complete user profile after OTP verification
+ * @desc    Register a new user
  * @route   POST /api/auth/register
  * @access  Private (requires valid token from verifyOtp)
  */
 export const register = catchAsync(async (req, res) => {
-  const { name, email, address, preferences } = req.body;
+  const { name, phoneNumber, email, address, preferences } = req.body;
 
-  logger.info('User registration attempt', { 
-    userId: req.user._id 
-  });
-
-  // Find user
-  const user = await User.findById(req.user._id);
-
-  if (!user) {
-    throw new NotFoundError('User not found');
+  // Validate required fields
+  if (!name || !phoneNumber) {
+    throw new BadRequestError('Name and phone number are required for registration');
   }
 
-  // Check if user is verified
-  if (!user.isVerified) {
-    throw new BadRequestError('Please verify your phone number first');
+  // Check if phone number already exists
+  const existingUser = await User.findOne({ phoneNumber });
+  if (existingUser) {
+    throw new BadRequestError('This phone number is already registered');
   }
 
   // Check if email already exists (if provided)
   if (email) {
-    const existingEmail = await User.findOne({ 
-      email, 
-      _id: { $ne: user._id } 
-    });
-    
+    const existingEmail = await User.findOne({ email });
     if (existingEmail) {
       throw new BadRequestError('This email is already registered');
     }
   }
 
-  // Update user profile
-  user.name = name;
-  if (email) user.email = email;
-  if (address) user.address = { ...user.address, ...address };
-  if (preferences) user.preferences = { ...user.preferences, ...preferences };
+  // Create new user
+  const user = new User({
+    name,
+    phoneNumber,
+    email,
+    address,
+    preferences,
+    isVerified: false, // Assume verification happens separately
+    isActive: true,
+    role: 'CUSTOMER', // Default role
+    token: null // Token will be set after verification
+  });
 
-  await user.save();
+  try {
+    await user.save();
+  } catch (error) {
+    if (error.code === 11000) {
+      // Handle MongoDB duplicate key error
+      throw new BadRequestError('This phone number is already registered');
+    }
+    throw error; // Rethrow other errors
+  }
 
-  logger.info('User registration completed', { 
+  // Log registration
+  logger.info('New user registered', {
     userId: user._id,
     phoneNumber: maskPhoneNumber(user.phoneNumber)
   });
 
-  // Prepare complete user data
+  // Prepare user data for response
   const userData = {
     id: user._id,
     phoneNumber: user.phoneNumber,
@@ -316,6 +323,7 @@ export const register = catchAsync(async (req, res) => {
     isVerified: user.isVerified,
     isActive: user.isActive,
     role: user.role,
+    token: user.token,
     profilePicture: user.profilePicture,
     address: user.address,
     preferences: user.preferences,
@@ -327,7 +335,7 @@ export const register = catchAsync(async (req, res) => {
   return sendSuccess(
     res,
     userData,
-    'Registration completed successfully',
+    'Registration completed successfully. Please verify your phone number.',
     201
   );
 });
@@ -338,8 +346,8 @@ export const register = catchAsync(async (req, res) => {
  * @access  Private
  */
 export const getUser = catchAsync(async (req, res) => {
-  logger.info('Fetching user profile', { 
-    userId: req.user._id 
+  logger.info('Fetching user profile', {
+    userId: req.user._id
   });
 
   // Prepare user data (req.user is attached by protect middleware)
@@ -375,8 +383,8 @@ export const getUser = catchAsync(async (req, res) => {
 export const updateProfile = catchAsync(async (req, res) => {
   const { name, email, address, preferences } = req.body;
 
-  logger.info('Profile update attempt', { 
-    userId: req.user._id 
+  logger.info('Profile update attempt', {
+    userId: req.user._id
   });
 
   const user = await User.findById(req.user._id);
@@ -387,11 +395,11 @@ export const updateProfile = catchAsync(async (req, res) => {
 
   // Check if email is being changed and already exists
   if (email && email !== user.email) {
-    const existingEmail = await User.findOne({ 
-      email, 
-      _id: { $ne: user._id } 
+    const existingEmail = await User.findOne({
+      email,
+      _id: { $ne: user._id }
     });
-    
+
     if (existingEmail) {
       throw new BadRequestError('This email is already registered');
     }
@@ -405,7 +413,7 @@ export const updateProfile = catchAsync(async (req, res) => {
 
   await user.save();
 
-  logger.info('Profile updated successfully', { 
+  logger.info('Profile updated successfully', {
     userId: user._id,
     updatedFields: {
       name: !!name,
@@ -441,8 +449,8 @@ export const updateProfile = catchAsync(async (req, res) => {
 export const resendOtp = catchAsync(async (req, res) => {
   const { phoneNumber, fcmToken } = req.body;
 
-  logger.info('OTP resend request', { 
-    phoneNumber: maskPhoneNumber(phoneNumber) 
+  logger.info('OTP resend request', {
+    phoneNumber: maskPhoneNumber(phoneNumber)
   });
 
   // Use the same logic as sendOtp
@@ -455,8 +463,8 @@ export const resendOtp = catchAsync(async (req, res) => {
  * @access  Private
  */
 export const logout = catchAsync(async (req, res) => {
-  logger.info('User logout', { 
-    userId: req.user._id 
+  logger.info('User logout', {
+    userId: req.user._id
   });
 
   // Remove token from user document
@@ -478,8 +486,8 @@ export const logout = catchAsync(async (req, res) => {
 export const deleteAccount = catchAsync(async (req, res) => {
   const { confirmPhoneNumber } = req.body;
 
-  logger.info('Account deletion request', { 
-    userId: req.user._id 
+  logger.info('Account deletion request', {
+    userId: req.user._id
   });
 
   // Verify phone number matches for safety
@@ -488,7 +496,7 @@ export const deleteAccount = catchAsync(async (req, res) => {
   }
 
   const user = await User.findById(req.user._id);
-  
+
   if (!user) {
     throw new NotFoundError('User not found');
   }
@@ -500,7 +508,7 @@ export const deleteAccount = catchAsync(async (req, res) => {
   // Remove token
   await User.findByIdAndUpdate(req.user._id, { $unset: { token: 1 } });
 
-  logger.warn('User account deleted', { 
+  logger.warn('User account deleted', {
     userId: user._id,
     phoneNumber: maskPhoneNumber(user.phoneNumber)
   });
@@ -519,8 +527,8 @@ export const deleteAccount = catchAsync(async (req, res) => {
 export const checkPhoneExists = catchAsync(async (req, res) => {
   const { phoneNumber } = req.body;
 
-  logger.info('Phone number check', { 
-    phoneNumber: maskPhoneNumber(phoneNumber) 
+  logger.info('Phone number check', {
+    phoneNumber: maskPhoneNumber(phoneNumber)
   });
 
   const user = await User.findOne({ phoneNumber });
