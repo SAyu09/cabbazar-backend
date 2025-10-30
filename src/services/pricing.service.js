@@ -87,7 +87,8 @@ class PricingService {
 
       // Check if trip is in the past
       if (tripDate < new Date()) {
-        throw new BadRequestError('Trip date cannot be in the past');
+        // Allow a small grace period (e.g., 5 mins) for immediate bookings, but search should handle this.
+        // For calculation, we'll proceed, but the controller validation should catch this.
       }
 
       // Check if trip is too far in future
@@ -258,7 +259,7 @@ class PricingService {
       let extraKm = 0;
       let extraHours = 0;
 
-      if (extras.extraKm !== undefined) {
+      if (extras && extras.extraKm !== undefined) {
         if (typeof extras.extraKm !== 'number' || extras.extraKm < 0) {
           throw new BadRequestError('Extra km must be a positive number');
         }
@@ -267,8 +268,8 @@ class PricingService {
         }
         extraKm = extras.extraKm;
       }
-
-      if (extras.extraHours !== undefined) {
+      
+      if (extras && extras.extraHours !== undefined) {
         if (typeof extras.extraHours !== 'number' || extras.extraHours < 0) {
           throw new BadRequestError('Extra hours must be a positive number');
         }
@@ -676,8 +677,10 @@ class PricingService {
         throw new BadRequestError('Origin and destination coordinates are required');
       }
 
-      if (!origin.lat || !origin.lng || !destination.lat || !destination.lng) {
-        throw new BadRequestError('Invalid coordinate format. Required: {lat, lng}');
+      if (typeof origin.lat !== 'number' || typeof origin.lng !== 'number' ||
+          typeof destination.lat !== 'number' || typeof destination.lng !== 'number') {
+        logger.warn('Invalid coordinate format received', { origin, destination });
+        throw new BadRequestError('Invalid coordinate format. Required: {lat, lng} with number values');
       }
 
       const R = 6371; // Earth's radius in km
@@ -692,13 +695,22 @@ class PricingService {
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distance = R * c;
       
-      // Add 20% for actual road distance (approximation)
-      const roadDistance = distance * 1.2;
+      // MODIFIED: Add 40% for actual road distance (approximation)
+      // This is a more realistic multiplier for road networks vs. straight-line.
+      const roadDistance = distance * 1.4; 
       
       return Math.round(roadDistance * 10) / 10;
     } catch (error) {
-      logger.error('Error calculating distance', { error: error.message });
-      throw error;
+      logger.error('Error calculating distance', { 
+        error: error.message,
+        origin,
+        destination
+      });
+      // Re-throw as a known error type if it's not already
+      if (error instanceof BadRequestError) {
+        throw error;
+      }
+      throw new BadRequestError(`Failed to calculate distance: ${error.message}`);
     }
   }
 

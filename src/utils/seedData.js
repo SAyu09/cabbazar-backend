@@ -18,8 +18,8 @@ dotenv.config();
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
-    logger.info('✅ MongoDB Connected for seeding');
+    // This is correct
+    await mongoose.connect(process.env.MONGO_URI); logger.info('✅ MongoDB Connected for seeding');
   } catch (error) {
     logger.error('❌ MongoDB connection failed:', error);
     process.exit(1);
@@ -709,14 +709,14 @@ const seedVehicles = async () => {
   try {
     const createdVehicles = await Vehicle.insertMany(vehicles);
     logger.info(`✅ ${createdVehicles.length} vehicles seeded`);
-    
+
     // Log summary by type
     const summary = createdVehicles.reduce((acc, v) => {
       acc[v.type] = (acc[v.type] || 0) + 1;
       return acc;
     }, {});
     logger.info('Vehicle summary by type:', summary);
-    
+
     return createdVehicles;
   } catch (error) {
     logger.error('Error seeding vehicles:', error);
@@ -983,14 +983,14 @@ const seedBookings = async (users, vehicles, drivers) => {
 
     const createdBookings = await Booking.insertMany(sampleBookings);
     logger.info(`✅ ${createdBookings.length} sample bookings seeded`);
-    
+
     // Log booking summary
     const statusSummary = createdBookings.reduce((acc, b) => {
       acc[b.status] = (acc[b.status] || 0) + 1;
       return acc;
     }, {});
     logger.info('Booking summary by status:', statusSummary);
-    
+
     return createdBookings;
   } catch (error) {
     logger.error('Error seeding bookings:', error);
@@ -1005,7 +1005,7 @@ const seedBookings = async (users, vehicles, drivers) => {
 const seedDatabase = async () => {
   try {
     logger.info('🌱 Starting database seeding...\n');
-    
+
     await connectDB();
 
     // Clear existing data
@@ -1027,11 +1027,11 @@ const seedDatabase = async () => {
     // ========================================
     // SUMMARY
     // ========================================
-    
+
     logger.info('\n' + '='.repeat(60));
     logger.info('✅ DATABASE SEEDED SUCCESSFULLY!');
     logger.info('='.repeat(60));
-    
+
     logger.info('\n📊 SUMMARY:');
     logger.info(`   ├─ Vehicles: ${vehicles.length}`);
     logger.info(`   │  ├─ Hatchback: ${vehicles.filter(v => v.type === 'HATCHBACK').length}`);
@@ -1054,7 +1054,7 @@ const seedDatabase = async () => {
 
     logger.info('🚗 AVAILABLE VEHICLES BY TYPE:');
     logger.info('━'.repeat(60));
-    
+
     const vehiclesByType = vehicles.reduce((acc, v) => {
       if (!acc[v.type]) acc[v.type] = [];
       acc[v.type].push(v);
@@ -1086,8 +1086,8 @@ const seedDatabase = async () => {
 const seedByType = async (type) => {
   try {
     await connectDB();
-    
-    switch(type) {
+
+    switch (type) {
       case 'vehicles':
         await Vehicle.deleteMany({});
         await seedVehicles();
@@ -1111,7 +1111,7 @@ const seedByType = async (type) => {
       default:
         logger.error('Invalid type. Use: vehicles, drivers, users, or bookings');
     }
-    
+
     logger.info(`✅ ${type} seeded successfully`);
     process.exit(0);
   } catch (error) {
@@ -1128,7 +1128,7 @@ const seedByType = async (type) => {
 if (import.meta.url === `file://${process.argv[1]}`) {
   // Check for specific type argument
   const type = process.argv[2];
-  
+
   if (type) {
     seedByType(type);
   } else {

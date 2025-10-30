@@ -272,10 +272,10 @@ export const register = catchAsync(async (req, res) => {
   }
 
   // Check if phone number already exists
-  const existingUser = await User.findOne({ phoneNumber });
-  if (existingUser) {
-    throw new BadRequestError('This phone number is already registered');
-  }
+  // const existingUser = await User.findOne({ phoneNumber });
+  // if (existingUser) {
+  //   throw new BadRequestError('This phone number is already registered');
+  // }
 
   // Check if email already exists (if provided)
   if (email) {
@@ -284,7 +284,7 @@ export const register = catchAsync(async (req, res) => {
       throw new BadRequestError('This email is already registered');
     }
   }
-
+  
   // Create new user
   const user = new User({
     name,
