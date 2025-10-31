@@ -223,7 +223,7 @@ export const verifyOtp = catchAsync(async (req, res) => {
       {
         token,
         user: userData,
-        newUser: false, // Flag for client
+        newUser: false,
         expiresIn: process.env.JWT_EXPIRE || '30d'
       },
       'Login successful',
