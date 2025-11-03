@@ -1,12 +1,10 @@
-// src/config/constants.js - Complete Application Constants
-
+// src/config/constants.js - Complete Application Constants (with 4 Local Packages)
 // Environment
 export const ENV = {
   DEVELOPMENT: 'development',
   PRODUCTION: 'production',
   TEST: 'test'
 };
-
 // HTTP Status Codes
 export const STATUS_CODES = {
   OK: 200,
@@ -19,7 +17,6 @@ export const STATUS_CODES = {
   TOO_MANY_REQUESTS: 429,
   INTERNAL_SERVER: 500
 };
-
 // Response Messages
 export const MESSAGES = {
   SUCCESS: 'Success',
@@ -30,13 +27,11 @@ export const MESSAGES = {
   SERVER_ERROR: 'Internal server error',
   VALIDATION_ERROR: 'Validation error'
 };
-
 // JWT Configuration
 export const JWT = {
   SECRET: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
   EXPIRES_IN: process.env.JWT_EXPIRE || '30d'
 };
-
 // Database Configuration
 export const DATABASE = {
   URL: process.env.MONGODB_URL || 'mongodb://localhost:27017/cabbazar',
@@ -45,21 +40,18 @@ export const DATABASE = {
     useUnifiedTopology: true
   }
 };
-
 // Pagination Defaults
 export const PAGINATION = {
   DEFAULT_PAGE: 1,
   DEFAULT_LIMIT: 10,
   MAX_LIMIT: 100
 };
-
 // User Roles
 export const USER_ROLES = {
   ADMIN: 'ADMIN',
   DRIVER: 'DRIVER',
   CUSTOMER: 'CUSTOMER'
 };
-
 // Booking Status
 export const BOOKING_STATUS = {
   PENDING: 'PENDING',
@@ -70,7 +62,6 @@ export const BOOKING_STATUS = {
   CANCELLED: 'CANCELLED',
   REJECTED: 'REJECTED'
 };
-
 // Payment Status
 export const PAYMENT_STATUS = {
   PENDING: 'PENDING',
@@ -80,7 +71,6 @@ export const PAYMENT_STATUS = {
   REFUNDED: 'REFUNDED',
   PARTIALLY_REFUNDED: 'PARTIALLY_REFUNDED'
 };
-
 // Payment Methods
 export const PAYMENT_METHODS = {
   CASH: 'CASH',
@@ -89,7 +79,6 @@ export const PAYMENT_METHODS = {
   WALLET: 'WALLET',
   NET_BANKING: 'NET_BANKING'
 };
-
 // Pricing Configuration
 export const PRICING = {
   HATCHBACK: {
@@ -113,9 +102,48 @@ export const PRICING = {
     nightChargeMultiplier: 1.2
   }
 };
-
-// Local Package Configuration
+// Local Package Configuration (UPDATED with 4 packages)
 export const LOCAL_PACKAGES = {
+  '2_20': {
+    hours: 2,
+    km: 20,
+    hatchback: 599,
+    sedan: 699,
+    suv: 899,
+    premium_sedan: 1199,
+    extraKmCharge: {
+      hatchback: 12,
+      sedan: 14,
+      suv: 18,
+      premium_sedan: 22
+    },
+    extraHourCharge: {
+      hatchback: 150,
+      sedan: 175,
+      suv: 200,
+      premium_sedan: 250
+    }
+  },
+  '4_40': { // NAYA PACKAGE
+    hours: 4,
+    km: 40,
+    hatchback: 899,
+    sedan: 999,
+    suv: 1299,
+    premium_sedan: 1799,
+    extraKmCharge: {
+      hatchback: 12,
+      sedan: 14,
+      suv: 18,
+      premium_sedan: 22
+    },
+    extraHourCharge: {
+      hatchback: 150,
+      sedan: 175,
+      suv: 200,
+      premium_sedan: 250
+    }
+  },
   '8_80': {
     hours: 8,
     km: 80,
@@ -157,7 +185,6 @@ export const LOCAL_PACKAGES = {
     }
   }
 };
-
 // Airport Transfer Base Prices
 export const AIRPORT_BASE_PRICE = {
   HATCHBACK: 499,
@@ -165,17 +192,17 @@ export const AIRPORT_BASE_PRICE = {
   SUV: 799,
   PREMIUM_SEDAN: 999
 };
-
-// Booking Types
+// Booking Types (UPDATED with 4 packages)
 export const BOOKING_TYPES = {
   ONE_WAY: 'ONE_WAY',
   ROUND_TRIP: 'ROUND_TRIP',
+  LOCAL_2_20: 'LOCAL_2_20',
+  LOCAL_4_40: 'LOCAL_4_40',
   LOCAL_8_80: 'LOCAL_8_80',
   LOCAL_12_120: 'LOCAL_12_120',
   AIRPORT_PICKUP: 'AIRPORT_PICKUP',
   AIRPORT_DROP: 'AIRPORT_DROP'
 };
-
 // Vehicle Types
 export const VEHICLE_TYPES = {
   HATCHBACK: 'HATCHBACK',
@@ -183,12 +210,10 @@ export const VEHICLE_TYPES = {
   SUV: 'SUV',
   PREMIUM_SEDAN: 'PREMIUM_SEDAN'
 };
-
 // Tax Configuration
 export const TAX_CONFIG = {
   GST_RATE: 0.05 // 5% GST
 };
-
 // Vehicle Capacity Configuration
 export const VEHICLE_CAPACITY = {
   HATCHBACK: { passengers: 4, luggage: 2 },
@@ -196,7 +221,6 @@ export const VEHICLE_CAPACITY = {
   SUV: { passengers: 6, luggage: 4 },
   PREMIUM_SEDAN: { passengers: 4, luggage: 3 }
 };
-
 // Vehicle Features
 export const VEHICLE_FEATURES = {
   HATCHBACK: ['AC', 'Music System', 'Central Locking'],
@@ -204,7 +228,6 @@ export const VEHICLE_FEATURES = {
   SUV: ['AC', 'Music System', 'Central Locking', 'Power Windows', 'Extra Space'],
   PREMIUM_SEDAN: ['AC', 'Premium Music System', 'Leather Seats', 'Premium Interior']
 };
-
 // Distance Configuration
 export const DISTANCE_CONFIG = {
   MIN_DISTANCE: 50, // Minimum distance for outstation (km)
@@ -213,17 +236,15 @@ export const DISTANCE_CONFIG = {
   AVERAGE_SPEED_HIGHWAY: 60, // km/h
   AVERAGE_SPEED_CITY: 30 // km/h
 };
-
 // Booking Configuration
 export const BOOKING_CONFIG = {
   CANCELLATION_WINDOW_HOURS: 24,
-  CANCELLATION_CHARGE_PERCENT: 20,
+  CANCELLATION_CHARGE_PERCENT: 0.20,
   MIN_BOOKING_HOURS_AHEAD: 2,
   ADVANCE_BOOKING_DAYS: 30,
   DRIVER_ACCEPTANCE_TIMEOUT_MINUTES: 5,
   MAX_BOOKING_PER_DAY: 10
 };
-
 // OTP Configuration
 export const OTP_CONFIG = {
   EXPIRY_MINUTES: Number(process.env.OTP_EXPIRY_MINUTES) || 10,
@@ -231,7 +252,6 @@ export const OTP_CONFIG = {
   RESEND_TIMEOUT_SECONDS: Number(process.env.OTP_RESEND_TIMEOUT_SECONDS) || 60,
   LENGTH: 6
 };
-
 // Notification Types
 export const NOTIFICATION_TYPES = {
   BOOKING_CREATED: 'BOOKING_CREATED',
@@ -245,17 +265,14 @@ export const NOTIFICATION_TYPES = {
   OTP_SENT: 'OTP_SENT',
   RATING_RECEIVED: 'RATING_RECEIVED'
 };
-
 // Socket Events
 export const SOCKET_EVENTS = {
   // Connection
   CONNECTION: 'connection',
   DISCONNECT: 'disconnect',
-  
   // User Events
   USER_JOINED: 'user:joined',
   USER_LEFT: 'user:left',
-  
   // Booking Events
   BOOKING_CREATED: 'booking:created',
   BOOKING_REQUEST: 'booking:request',
@@ -263,30 +280,25 @@ export const SOCKET_EVENTS = {
   BOOKING_REJECTED: 'booking:rejected',
   BOOKING_CANCELLED: 'booking:cancelled',
   BOOKING_UPDATED: 'booking:updated',
-  
   // Trip Events
   TRIP_STARTED: 'trip:started',
   TRIP_UPDATED: 'trip:updated',
   TRIP_COMPLETED: 'trip:completed',
-  
   // Driver Events
   DRIVER_LOCATION: 'driver:location',
   DRIVER_STATUS: 'driver:status',
   DRIVER_ARRIVED: 'driver:arrived',
-  
   // Chat Events
   MESSAGE_SENT: 'message:sent',
   MESSAGE_RECEIVED: 'message:received',
   TYPING: 'typing'
 };
-
 // File Upload Configuration
 export const UPLOAD_CONFIG = {
   MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
   ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/jpg'],
   ALLOWED_DOCUMENT_TYPES: ['application/pdf', 'image/jpeg', 'image/png']
 };
-
 // Rate Limiting Configuration
 export const RATE_LIMIT = {
   WINDOW_MS: 15 * 60 * 1000, // 15 minutes
@@ -294,7 +306,6 @@ export const RATE_LIMIT = {
   OTP_MAX_REQUESTS: 3,
   OTP_WINDOW_MS: 60 * 60 * 1000 // 1 hour
 };
-
 // Default Values
 export const DEFAULTS = {
   LANGUAGE: 'en',
@@ -302,7 +313,6 @@ export const DEFAULTS = {
   COUNTRY: 'India',
   TIMEZONE: 'Asia/Kolkata'
 };
-
 export default {
   ENV,
   STATUS_CODES,
