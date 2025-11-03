@@ -1,6 +1,6 @@
 // src/controllers/auth.controller.js - REVISED AUTH FLOW
 import User from '../models/User.js';
-import { Otp } from '../models/otp.js';
+import { Otp } from '../models/Otp.js';
 import { sendSuccess } from '../utils/response.js';
 import { setTokenCookie, clearTokenCookie, generateToken } from '../middleware/auth.middleware.js'; // Import generateToken
 import { catchAsync } from '../utils/catchAsync.js';
