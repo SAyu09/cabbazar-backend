@@ -1,6 +1,6 @@
 // src/controllers/auth.controller.js - REVISED AUTH FLOW
 import User from '../models/User.js';
-import { Otp } from '../models/otp.js';
+import { Otp } from '../models/Otp.js';
 import { sendSuccess } from '../utils/response.js';
 import { setTokenCookie, clearTokenCookie, generateToken } from '../middleware/auth.middleware.js'; // Import generateToken
 import { catchAsync } from '../utils/catchAsync.js';
@@ -9,6 +9,8 @@ import { maskPhoneNumber, maskEmail } from '../utils/helpers.js';
 import logger from '../config/logger.js';
 import { sendOTPNotification } from '../utils/sendOtp.js';
 import { OTP_CONFIG } from '../config/constants.js'; // Import config from constants
+
+
 
 /**
  * @desc    Send OTP to phone number
