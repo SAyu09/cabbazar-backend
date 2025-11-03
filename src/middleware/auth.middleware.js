@@ -1,9 +1,14 @@
 // src/middleware/auth.middleware.js - Complete Authentication Middleware
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import catchAsync from '../utils/catchAsync.js';
+import {catchAsync} from '../utils/catchAsync.js';
 import { AuthenticationError, AuthorizationError } from '../utils/customError.js';
 import logger from '../config/logger.js';
+// We no longer import or run dotenv.config() here.
+// server.js is the single source of truth for loading and validating env vars.
+
+// We can safely assume JWT_SECRET exists because server.js validates it at startup.
+const JWT_SECRET = process.env.JWT_SECRET;
 
 /**
  * Protect routes - Verify JWT token and authenticate user
@@ -32,7 +37,7 @@ export const protect = catchAsync(async (req, res, next) => {
 
   try {
     // 3. Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET); // Use the checked variable
 
     // 4. Check if user still exists
     const user = await User.findById(decoded.id).select('-otp');
@@ -103,7 +108,7 @@ export const restrictTo = (...roles) => {
 export const generateToken = (id, expiresIn = null) => {
   const expiry = expiresIn || process.env.JWT_EXPIRE || '30d';
   
-  const token = jwt.sign({ id }, process.env.JWT_SECRET, {
+  const token = jwt.sign({ id }, JWT_SECRET, { // Use the checked variable
     expiresIn: expiry
   });
 
@@ -116,24 +121,20 @@ export const generateToken = (id, expiresIn = null) => {
 };
 
 /**
- * Generate refresh token
- * @param {string} id - User ID
- * @returns {string} Refresh token
+ * Generate refresh token using the same JWT_SECRET
  */
 export const generateRefreshToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+  return jwt.sign({ id }, JWT_SECRET, { 
     expiresIn: process.env.JWT_REFRESH_EXPIRE || '90d'
   });
 };
 
 /**
- * Verify refresh token
- * @param {string} token - Refresh token
- * @returns {Object} Decoded token
+ * Verify refresh token using JWT_SECRET
  */
 export const verifyRefreshToken = (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
+    return jwt.verify(token, JWT_SECRET);
   } catch (error) {
     throw new AuthenticationError('Invalid refresh token');
   }
@@ -151,7 +152,7 @@ export const optionalAuth = catchAsync(async (req, res, next) => {
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET); // Use the checked variable
       const user = await User.findById(decoded.id).select('-otp');
       
       if (user && user.isActive) {
