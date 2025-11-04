@@ -1,7 +1,6 @@
 // src/controllers/booking.controller.js - FIXED VERSION (No Frontend Coordinates)
 import axios from 'axios';
-import Booking from '../models/Booking.js';
-import User from '../models/User.js';
+import { Booking, User, Vehicle } from '../models/index.js';
 import pricingService from '../services/pricing.service.js';
 import { sendSuccess, sendPaginatedResponse } from '../utils/response.js';
 import { catchAsync } from '../utils/catchAsync.js';
@@ -581,20 +580,21 @@ export const createBooking = catchAsync(async (req, res) => {
   );
 });
 
-/**
- * @desc    Get booking by ID
- * @route   GET /api/bookings/:id
- * @access  Private
- */
 export const getBooking = catchAsync(async (req, res) => {
   const bookingDbId = req.params.id;
+  console.log("Booking DB ID:", bookingDbId);
+  
   const booking = await Booking.findOne({
     _id: bookingDbId,
     userId: req.user._id
   })
     .populate('userId', 'phoneNumber name email profilePicture')
     .populate('vehicleId', 'type modelName licensePlate color capacity features year fuelType')
-    .populate('driverId', 'name phoneNumber rating totalRides profilePicture vehicleId');
+    .populate({
+      path: 'driverId',
+      select: 'name phoneNumber rating completedRides profilePicture vehicleId',
+      model: 'User'  
+    });
 
   if (!booking) {
     logger.warn('Booking not found by DB ID or user mismatch', {
@@ -612,7 +612,6 @@ export const getBooking = catchAsync(async (req, res) => {
 
   return sendSuccess(res, booking.toObject({ virtuals: true }), 'Booking retrieved successfully', 200);
 });
-
 /**
  * @desc    Get booking by booking code
  * @route   GET /api/bookings/code/:bookingId
