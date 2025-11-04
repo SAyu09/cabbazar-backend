@@ -207,7 +207,7 @@ router.get('/code/:bookingId', protect, bookingController.getBookingByCode);
  * @desc    Get booking by database ID
  * @access  Private
  */
-router.get('/:id', protect, validateObjectId('id'), bookingController.getBooking);
+router.get('/getBooking/:id', protect, validateObjectId('id'), bookingController.getBooking);
 
 /**
  * @route   PATCH /api/bookings/:id/status
