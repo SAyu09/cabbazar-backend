@@ -35,7 +35,7 @@ export const getMyBookings = catchAsync(async (req, res) => {
     .skip(skip)
     .limit(limit)
     .populate('vehicleId', 'type modelName licensePlate color')
-    .populate('driverId', 'name phoneNumber rating totalRides')
+    //.populate('driverId', 'name phoneNumber rating totalRides')
     .select('-metadata'); // Exclude metadata for cleaner response
 
   // Get total count

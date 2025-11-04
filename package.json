@@ -21,6 +21,7 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
+    "@googlemaps/google-maps-services-js": "^3.4.2",
     "axios": "^1.13.1",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
@@ -42,7 +43,7 @@
   "devDependencies": {
     "nodemon": "^3.0.2"
   },
- "engines": {
+  "engines": {
     "node": "^18.0.0",
     "npm": ">=8.0.0"
   }

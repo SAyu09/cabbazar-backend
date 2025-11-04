@@ -39,7 +39,7 @@ const searchValidation = [
  * @desc    Get user's booking history with filters
  * @access  Private
  */
-router.get('/me/bookings', validatePagination, userController.getMyBookings);
+router.get('/getMyBookings', protect , userController.getMyBookings);
 
 /**
  * @route   GET /api/users/me/bookings/upcoming

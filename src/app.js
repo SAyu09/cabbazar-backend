@@ -54,7 +54,7 @@ app.get('/health', (req, res) => {
 // API Routes - Version 1
 app.use('/api/auth', authRoutes);
 app.use('/api/bookings', bookingRoutes);
-app.use('/api/users', userRoutes);
+app.use('/api/user', userRoutes);
 // Add other v1 routes here
 
 // API Routes - Version 2 (if needed)
