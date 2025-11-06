@@ -188,6 +188,10 @@ router.get('/', protect, bookingController.getAllBookings);
  */
 router.post('/createBooking', protect, bookingController.createBooking);
 
+
+
+router.post('/verifyBookingPayment', protect, bookingController.verifyBookingPayment);
+
 /**
  * @route   GET /api/bookings/stats
  * @desc    Get booking statistics

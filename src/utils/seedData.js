@@ -1,4 +1,4 @@
-// src/utils/seedData.js - Complete Database Seeder with Realistic Cab Data
+// src/utils/seedData.js - Updated for Payment Model
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 // CORRECTED IMPORTS
@@ -6,8 +6,15 @@ import Vehicle from '../models/Vehicle.js';
 import Driver from '../models/Driver.js';
 import User from '../models/User.js';
 import Booking from '../models/Booking.js';
+import Payment from '../models/Payment.js'; // --- ADDED PAYMENT MODEL ---
 // END CORRECTED IMPORTS
-import { VEHICLE_TYPES, BOOKING_TYPES, BOOKING_STATUS } from '../config/constants.js';
+import {
+  VEHICLE_TYPES,
+  BOOKING_TYPES,
+  BOOKING_STATUS,
+  PAYMENT_STATUS, // --- ADDED ---
+  PAYMENT_METHODS // --- ADDED ---
+} from '../config/constants.js';
 import logger from '../config/logger.js';
 
 dotenv.config();
@@ -18,8 +25,8 @@ dotenv.config();
 
 const connectDB = async () => {
   try {
-    // This is correct
-    await mongoose.connect(process.env.MONGO_URI); logger.info('✅ MongoDB Connected for seeding');
+    await mongoose.connect(process.env.MONGO_URI);
+    logger.info('✅ MongoDB Connected for seeding');
   } catch (error) {
     logger.error('❌ MongoDB connection failed:', error);
     process.exit(1);
@@ -27,7 +34,7 @@ const connectDB = async () => {
 };
 
 // ============================================
-// SAMPLE VEHICLE DATA (Sedan, Prime/Premium, SUV)
+// SAMPLE VEHICLE DATA (Unchanged)
 // ============================================
 
 const vehicles = [
@@ -314,7 +321,7 @@ const vehicles = [
 ];
 
 // ============================================
-// SAMPLE DRIVER DATA (Assigned to Vehicles)
+// SAMPLE DRIVER DATA (Unchanged)
 // ============================================
 
 const drivers = [
@@ -640,7 +647,7 @@ const drivers = [
 ];
 
 // ============================================
-// SAMPLE USER DATA
+// SAMPLE USER DATA (Unchanged)
 // ============================================
 
 const sampleUsers = [
@@ -691,11 +698,12 @@ const sampleUsers = [
  */
 const clearData = async () => {
   try {
+    await Payment.deleteMany({}); // --- ADDED ---
     await Vehicle.deleteMany({});
     await Driver.deleteMany({});
     await User.deleteMany({});
     await Booking.deleteMany({});
-    logger.info('🗑️  All data cleared successfully');
+    logger.info('🗑️  All data cleared successfully (including Payments)');
   } catch (error) {
     logger.error('Error clearing data:', error);
     throw error;
@@ -709,14 +717,11 @@ const seedVehicles = async () => {
   try {
     const createdVehicles = await Vehicle.insertMany(vehicles);
     logger.info(`✅ ${createdVehicles.length} vehicles seeded`);
-
-    // Log summary by type
     const summary = createdVehicles.reduce((acc, v) => {
       acc[v.type] = (acc[v.type] || 0) + 1;
       return acc;
     }, {});
     logger.info('Vehicle summary by type:', summary);
-
     return createdVehicles;
   } catch (error) {
     logger.error('Error seeding vehicles:', error);
@@ -729,10 +734,10 @@ const seedVehicles = async () => {
  */
 const seedDrivers = async (vehicles) => {
   try {
-    // Assign vehicles to drivers
     const driversWithVehicles = drivers.map((driver, index) => ({
       ...driver,
-      vehicleId: vehicles[index]._id
+      // Assign vehicles sequentially
+      vehicleId: vehicles[index % vehicles.length]._id 
     }));
 
     const createdDrivers = await Driver.insertMany(driversWithVehicles);
@@ -759,244 +764,230 @@ const seedUsers = async () => {
 };
 
 /**
- * Seed sample bookings
+ * Seed sample bookings and payments
  */
 const seedBookings = async (users, vehicles, drivers) => {
   try {
-    if (users.length === 0) {
-      logger.warn('No users available for booking seeding');
+    if (users.length === 0 || vehicles.length === 0 || drivers.length === 0) {
+      logger.warn('Cannot seed bookings: missing users, vehicles, or drivers.');
       return [];
     }
 
     const now = new Date();
-    const sampleBookings = [
-      // Upcoming Sedan Booking
-      {
-        userId: users[0]._id,
-        bookingType: BOOKING_TYPES.ONE_WAY,
-        pickupLocation: {
-          city: 'Delhi',
-          address: 'Connaught Place, New Delhi'
-        },
-        dropLocation: {
-          city: 'Agra',
-          address: 'Taj Mahal, Agra'
-        },
-        startDateTime: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000), // 2 days from now
-        vehicleType: 'SEDAN',
-        vehicleId: vehicles.find(v => v.type === 'SEDAN')?._id,
-        driverId: drivers.find(d => d.vehicleId?.equals(vehicles.find(v => v.type === 'SEDAN')?._id))?._id,
-        passengerDetails: {
-          name: users[0].name,
-          phone: users[0].phoneNumber,
-          email: users[0].email
-        },
-        fareDetails: {
-          baseFare: 2530,
-          distance: 230,
-          gst: 127,
-          totalFare: 2530,
-          finalAmount: 2657
-        },
-        status: BOOKING_STATUS.CONFIRMED
-      },
-      // Completed Premium Sedan Booking
-      {
-        userId: users[0]._id,
-        bookingType: BOOKING_TYPES.AIRPORT_DROP,
-        pickupLocation: {
-          city: 'Delhi',
-          address: 'Vasant Vihar, New Delhi'
-        },
-        dropLocation: {
-          city: 'Delhi',
-          address: 'Indira Gandhi International Airport, Terminal 3'
-        },
-        startDateTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
-        vehicleType: 'PREMIUM_SEDAN',
-        vehicleId: vehicles.find(v => v.type === 'PREMIUM_SEDAN')?._id,
-        driverId: drivers.find(d => d.vehicleId?.equals(vehicles.find(v => v.type === 'PREMIUM_SEDAN')?._id))?._id,
-        passengerDetails: {
-          name: users[0].name,
-          phone: users[0].phoneNumber
-        },
-        fareDetails: {
-          baseFare: 1600,
-          distance: 20,
-          gst: 80,
-          totalFare: 1600,
-          finalAmount: 1680
-        },
-        status: BOOKING_STATUS.COMPLETED,
-        trip: {
-          actualStartTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
-          actualEndTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000 + 45 * 60 * 1000),
-          actualDistance: 22,
-          startOdometer: 5000,
-          endOdometer: 5022
-        }
-      },
-      // Upcoming SUV Local Rental
-      {
-        userId: users[1]._id,
-        bookingType: BOOKING_TYPES.LOCAL_8_80,
-        pickupLocation: {
-          city: 'Delhi',
-          address: 'India Gate, New Delhi'
-        },
-        dropLocation: {
-          city: 'Delhi',
-          address: 'India Gate, New Delhi'
-        },
-        startDateTime: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000), // 3 days from now
-        vehicleType: 'SUV',
-        vehicleId: vehicles.find(v => v.type === 'SUV')?._id,
-        driverId: drivers.find(d => d.vehicleId?.equals(vehicles.find(v => v.type === 'SUV')?._id))?._id,
-        passengerDetails: {
-          name: users[1].name,
-          phone: users[1].phoneNumber,
-          email: users[1].email
-        },
-        fareDetails: {
-          baseFare: 2800,
-          distance: 80,
-          duration: 8,
-          gst: 140,
-          totalFare: 2800,
-          finalAmount: 2940
-        },
-        status: BOOKING_STATUS.CONFIRMED,
-        specialRequests: ['Child seat required', 'AC must be working'],
-        notes: 'Family sightseeing trip'
-      },
-      // Completed Sedan Round Trip
-      {
-        userId: users[1]._id,
-        bookingType: BOOKING_TYPES.ROUND_TRIP,
-        pickupLocation: {
-          city: 'Delhi',
-          address: 'Nehru Place, New Delhi'
-        },
-        dropLocation: {
-          city: 'Jaipur',
-          address: 'Hawa Mahal, Jaipur'
-        },
-        startDateTime: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000), // 10 days ago
-        endDateTime: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000),
-        vehicleType: 'SEDAN',
-        vehicleId: vehicles.find(v => v.type === 'SEDAN' && v.licensePlate !== vehicles[0].licensePlate)?._id,
-        driverId: drivers[1]?._id,
-        passengerDetails: {
-          name: users[1].name,
-          phone: users[1].phoneNumber
-        },
-        fareDetails: {
-          baseFare: 5520,
-          distance: 560, // 280 km × 2
-          gst: 276,
-          totalFare: 5520,
-          finalAmount: 5796
-        },
-        status: BOOKING_STATUS.COMPLETED,
-        trip: {
-          actualStartTime: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000),
-          actualEndTime: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000),
-          actualDistance: 565,
-          startOdometer: 18000,
-          endOdometer: 18565
-        },
-        rating: {
-          value: 5,
-          comment: 'Excellent service, very professional driver',
-          ratedAt: new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000)
-        }
-      },
-      // Cancelled Hatchback Booking
-      {
-        userId: users[2]._id,
-        bookingType: BOOKING_TYPES.ONE_WAY,
-        pickupLocation: {
-          city: 'Delhi',
-          address: 'Karol Bagh, New Delhi'
-        },
-        dropLocation: {
-          city: 'Gurgaon',
-          address: 'Cyber City, Gurgaon'
-        },
-        startDateTime: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
-        vehicleType: 'HATCHBACK',
-        vehicleId: vehicles.find(v => v.type === 'HATCHBACK')?._id,
-        passengerDetails: {
-          name: users[2].name,
-          phone: users[2].phoneNumber
-        },
-        fareDetails: {
-          baseFare: 350,
-          distance: 35,
-          gst: 18,
-          totalFare: 350,
-          finalAmount: 368
-        },
-        status: BOOKING_STATUS.CANCELLED,
-        cancellation: {
-          cancelledBy: 'USER',
-          cancelledAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
-          reason: 'Plans changed',
-          cancellationCharge: 0
-        }
-      },
-      // In-Progress Premium Sedan Booking
-      {
-        userId: users[0]._id,
-        bookingType: BOOKING_TYPES.AIRPORT_PICKUP,
-        pickupLocation: {
-          city: 'Delhi',
-          address: 'Indira Gandhi International Airport, Terminal 3'
-        },
-        dropLocation: {
-          city: 'Delhi',
-          address: 'The Leela Palace, Chanakyapuri'
-        },
-        startDateTime: new Date(now.getTime() - 30 * 60 * 1000), // 30 minutes ago
-        vehicleType: 'PREMIUM_SEDAN',
-        vehicleId: vehicles.find(v => v.type === 'PREMIUM_SEDAN' && v.licensePlate !== vehicles.find(veh => veh.type === 'PREMIUM_SEDAN')?.licensePlate)?._id,
-        driverId: drivers[5]?._id,
-        passengerDetails: {
-          name: users[0].name,
-          phone: users[0].phoneNumber,
-          email: users[0].email
-        },
-        fareDetails: {
-          baseFare: 1650,
-          distance: 18,
-          gst: 83,
-          totalFare: 1650,
-          finalAmount: 1733
-        },
-        status: BOOKING_STATUS.IN_PROGRESS,
-        trip: {
-          actualStartTime: new Date(now.getTime() - 25 * 60 * 1000),
-          startOdometer: 3000
-        }
-      }
-    ];
+    const bookingsToCreate = [];
+    const paymentsToCreate = [];
 
-    const createdBookings = await Booking.insertMany(sampleBookings);
-    logger.info(`✅ ${createdBookings.length} sample bookings seeded`);
+    // Helper to find a vehicle and its driver
+    const getVehicleAndDriver = (type) => {
+      const vehicle = vehicles.find(v => v.type === type);
+      if (!vehicle) return { vehicleId: null, driverId: null };
+      const driver = drivers.find(d => d.vehicleId.equals(vehicle._id));
+      return { vehicleId: vehicle._id, driverId: driver ? driver._id : null };
+    };
+    
+    // --- 1. Upcoming Sedan Booking (Paid Online) ---
+    const { vehicleId: sedanVid, driverId: sedanDid } = getVehicleAndDriver('SEDAN');
+    const booking1 = new Booking({
+      userId: users[0]._id,
+      bookingType: BOOKING_TYPES.ONE_WAY,
+      pickupLocation: { city: 'Delhi', address: 'Connaught Place, New Delhi', lat: 28.6330, lng: 77.2197 },
+      dropLocation: { city: 'Agra', address: 'Taj Mahal, Agra', lat: 27.1751, lng: 78.0421 },
+      startDateTime: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000), // 2 days from now
+      vehicleType: 'SEDAN',
+      vehicleId: sedanVid,
+      driverId: sedanDid,
+      passengerDetails: { name: users[0].name, phone: users[0].phoneNumber, email: users[0].email },
+      fareDetails: { baseFare: 2530, distance: 230, gst: 127, totalFare: 2530, finalAmount: 2657, perKmRate: 11 },
+      status: BOOKING_STATUS.CONFIRMED,
+    });
+    const payment1 = new Payment({
+      userId: users[0]._id,
+      bookingId: booking1._id,
+      amount: 2657,
+      status: PAYMENT_STATUS.COMPLETED,
+      method: PAYMENT_METHODS.CARD,
+      razorpayPaymentId: 'pay_seed_1a2b3c'
+    });
+    booking1.paymentId = payment1._id;
+    bookingsToCreate.push(booking1);
+    paymentsToCreate.push(payment1);
+
+    // --- 2. Completed Premium Sedan Booking (Paid Online) ---
+    const { vehicleId: pSedanVid, driverId: pSedanDid } = getVehicleAndDriver('PREMIUM_SEDAN');
+    const booking2 = new Booking({
+      userId: users[0]._id,
+      bookingType: BOOKING_TYPES.AIRPORT_DROP,
+      pickupLocation: { city: 'Delhi', address: 'Vasant Vihar, New Delhi', lat: 28.5602, lng: 77.1648 },
+      dropLocation: { city: 'Delhi', address: 'Indira Gandhi International Airport, Terminal 3', lat: 28.5562, lng: 77.1000 },
+      startDateTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
+      vehicleType: 'PREMIUM_SEDAN',
+      vehicleId: pSedanVid,
+      driverId: pSedanDid,
+      passengerDetails: { name: users[0].name, phone: users[0].phoneNumber },
+      fareDetails: { baseFare: 1600, distance: 20, gst: 80, totalFare: 1600, finalAmount: 1680, perKmRate: 22 },
+      status: BOOKING_STATUS.COMPLETED,
+      trip: {
+        actualStartTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
+        actualEndTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000 + 45 * 60 * 1000),
+        actualDistance: 22, startOdometer: 5000, endOdometer: 5022
+      }
+    });
+    const payment2 = new Payment({
+      userId: users[0]._id,
+      bookingId: booking2._id,
+      amount: 1680,
+      status: PAYMENT_STATUS.COMPLETED,
+      method: PAYMENT_METHODS.UPI,
+      razorpayPaymentId: 'pay_seed_4d5e6f'
+    });
+    booking2.paymentId = payment2._id;
+    bookingsToCreate.push(booking2);
+    paymentsToCreate.push(payment2);
+
+    // --- 3. Upcoming SUV Local Rental (Cash) ---
+    const { vehicleId: suvVid, driverId: suvDid } = getVehicleAndDriver('SUV');
+    const booking3 = new Booking({
+      userId: users[1]._id,
+      bookingType: BOOKING_TYPES.LOCAL_8_80,
+      pickupLocation: { city: 'Delhi', address: 'India Gate, New Delhi', lat: 28.6129, lng: 77.2295 },
+      dropLocation: { city: 'Delhi', address: 'India Gate, New Delhi', lat: 28.6129, lng: 77.2295 },
+      startDateTime: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000), // 3 days from now
+      vehicleType: 'SUV',
+      vehicleId: suvVid,
+      driverId: suvDid,
+      passengerDetails: { name: users[1].name, phone: users[1].phoneNumber, email: users[1].email },
+      fareDetails: { baseFare: 2800, distance: 80, duration: 8, gst: 140, totalFare: 2800, finalAmount: 2940 },
+      status: BOOKING_STATUS.CONFIRMED,
+      specialRequests: ['Child seat required', 'AC must be working'],
+    });
+    const payment3 = new Payment({
+      userId: users[1]._id,
+      bookingId: booking3._id,
+      amount: 2940,
+      status: PAYMENT_STATUS.PENDING,
+      method: PAYMENT_METHODS.CASH,
+    });
+    booking3.paymentId = payment3._id;
+    bookingsToCreate.push(booking3);
+    paymentsToCreate.push(payment3);
+
+    // --- 4. Completed Sedan Round Trip (Paid Online) ---
+    const { vehicleId: sedan2Vid, driverId: sedan2Did } = getVehicleAndDriver('SEDAN');
+    const booking4 = new Booking({
+      userId: users[1]._id,
+      bookingType: BOOKING_TYPES.ROUND_TRIP,
+      pickupLocation: { city: 'Delhi', address: 'Nehru Place, New Delhi', lat: 28.5484, lng: 77.2513 },
+      dropLocation: { city: 'Jaipur', address: 'Hawa Mahal, Jaipur', lat: 26.9239, lng: 75.8267 },
+      startDateTime: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000), // 10 days ago
+      endDateTime: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000),
+      vehicleType: 'SEDAN',
+      vehicleId: sedan2Vid,
+      driverId: sedan2Did,
+      passengerDetails: { name: users[1].name, phone: users[1].phoneNumber },
+      fareDetails: { baseFare: 5520, distance: 560, gst: 276, totalFare: 5520, finalAmount: 5796, perKmRate: 9.85 },
+      status: BOOKING_STATUS.COMPLETED,
+      trip: {
+        actualStartTime: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000),
+        actualEndTime: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000),
+        actualDistance: 565, startOdometer: 18000, endOdometer: 18565
+      },
+      rating: { value: 5, comment: 'Excellent service, very professional driver' }
+    });
+    const payment4 = new Payment({
+      userId: users[1]._id,
+      bookingId: booking4._id,
+      amount: 5796,
+      status: PAYMENT_STATUS.COMPLETED,
+      method: PAYMENT_METHODS.NET_BANKING,
+      razorpayPaymentId: 'pay_seed_7g8h9i'
+    });
+    booking4.paymentId = payment4._id;
+    bookingsToCreate.push(booking4);
+    paymentsToCreate.push(payment4);
+
+    // --- 5. Cancelled Hatchback Booking (Was Pending Payment) ---
+    const { vehicleId: hatchVid, driverId: hatchDid } = getVehicleAndDriver('HATCHBACK');
+    const booking5 = new Booking({
+      userId: users[2]._id,
+      bookingType: BOOKING_TYPES.ONE_WAY,
+      pickupLocation: { city: 'Delhi', address: 'Karol Bagh, New Delhi', lat: 28.647, lng: 77.195 },
+      dropLocation: { city: 'Gurgaon', address: 'Cyber City, Gurgaon', lat: 28.494, lng: 77.088 },
+      startDateTime: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
+      vehicleType: 'HATCHBACK',
+      vehicleId: hatchVid,
+      passengerDetails: { name: users[2].name, phone: users[2].phoneNumber },
+      fareDetails: { baseFare: 350, distance: 35, gst: 18, totalFare: 350, finalAmount: 368, perKmRate: 10 },
+      status: BOOKING_STATUS.CANCELLED, // Booking is cancelled
+      cancellation: {
+        cancelledBy: 'USER',
+        cancelledAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
+        reason: 'Plans changed',
+        charge: 0
+      }
+    });
+    const payment5 = new Payment({
+      userId: users[2]._id,
+      bookingId: booking5._id,
+      amount: 368,
+      status: PAYMENT_STATUS.FAILED, // Payment failed as it was never completed
+      method: PAYMENT_METHODS.UPI,
+      failureReason: 'Booking cancelled by user before payment'
+    });
+    booking5.paymentId = payment5._id;
+    bookingsToCreate.push(booking5);
+    paymentsToCreate.push(payment5);
+
+    // --- 6. In-Progress Premium Sedan Booking (Cash) ---
+    const { vehicleId: pSedan2Vid, driverId: pSedan2Did } = getVehicleAndDriver('PREMIUM_SEDAN');
+    const booking6 = new Booking({
+      userId: users[0]._id,
+      bookingType: BOOKING_TYPES.AIRPORT_PICKUP,
+      pickupLocation: { city: 'Delhi', address: 'Indira Gandhi International Airport, T3', lat: 28.5562, lng: 77.1000 },
+      dropLocation: { city: 'Delhi', address: 'The Leela Palace, Chanakyapuri', lat: 28.5968, lng: 77.1895 },
+      startDateTime: new Date(now.getTime() - 30 * 60 * 1000), // 30 minutes ago
+      vehicleType: 'PREMIUM_SEDAN',
+      vehicleId: pSedan2Vid,
+      driverId: pSedan2Did,
+      passengerDetails: { name: users[0].name, phone: users[0].phoneNumber, email: users[0].email },
+      fareDetails: { baseFare: 1650, distance: 18, gst: 83, totalFare: 1650, finalAmount: 1733, perKmRate: 22 },
+      status: BOOKING_STATUS.IN_PROGRESS,
+      trip: {
+        actualStartTime: new Date(now.getTime() - 25 * 60 * 1000),
+        startOdometer: 3000
+      }
+    });
+    const payment6 = new Payment({
+      userId: users[0]._id,
+      bookingId: booking6._id,
+      amount: 1733,
+      status: PAYMENT_STATUS.PENDING,
+      method: PAYMENT_METHODS.CASH,
+    });
+    booking6.paymentId = payment6._id;
+    bookingsToCreate.push(booking6);
+    paymentsToCreate.push(payment6);
+
+
+    // --- Bulk insert all created documents ---
+    await Payment.insertMany(paymentsToCreate);
+    await Booking.insertMany(bookingsToCreate);
+    
+    logger.info(`✅ ${bookingsToCreate.length} sample bookings and payments seeded`);
 
     // Log booking summary
-    const statusSummary = createdBookings.reduce((acc, b) => {
+    const statusSummary = bookingsToCreate.reduce((acc, b) => {
       acc[b.status] = (acc[b.status] || 0) + 1;
       return acc;
     }, {});
     logger.info('Booking summary by status:', statusSummary);
 
-    return createdBookings;
+    return bookingsToCreate;
   } catch (error) {
     logger.error('Error seeding bookings:', error);
     throw error;
   }
 };
+
 
 // ============================================
 // MAIN SEED FUNCTION
@@ -1021,7 +1012,7 @@ const seedDatabase = async () => {
     logger.info('\n👤 Seeding users...');
     const users = await seedUsers();
 
-    logger.info('\n📋 Seeding sample bookings...');
+    logger.info('\n📋 Seeding sample bookings & payments...');
     const bookings = await seedBookings(users, vehicles, drivers);
 
     // ========================================
@@ -1040,7 +1031,8 @@ const seedDatabase = async () => {
     logger.info(`   │  └─ SUV: ${vehicles.filter(v => v.type === 'SUV').length}`);
     logger.info(`   ├─ Drivers: ${drivers.length}`);
     logger.info(`   ├─ Users: ${users.length}`);
-    logger.info(`   └─ Bookings: ${bookings.length}\n`);
+    logger.info(`   ├─ Bookings: ${bookings.length}`);
+    logger.info(`   └─ Payments: ${bookings.length}\n`); // Added Payments count
 
     logger.info('🔐 TEST USER CREDENTIALS:');
     logger.info('━'.repeat(60));
@@ -1050,7 +1042,7 @@ const seedDatabase = async () => {
       logger.info(`      Name: ${user.name}`);
       logger.info(`      Email: ${user.email || 'N/A'}`);
     });
-    logger.info('   OTP: Use any 6 digits in development mode\n');
+    logger.info('   OTP: Check console logs when running in dev mode\n');
 
     logger.info('🚗 AVAILABLE VEHICLES BY TYPE:');
     logger.info('━'.repeat(60));
@@ -1103,6 +1095,7 @@ const seedByType = async (type) => {
         break;
       case 'bookings':
         await Booking.deleteMany({});
+        await Payment.deleteMany({}); // --- ADDED ---
         const u = await User.find({});
         const v = await Vehicle.find({});
         const d = await Driver.find({});
@@ -1126,7 +1119,6 @@ const seedByType = async (type) => {
 
 // Check if running directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  // Check for specific type argument
   const type = process.argv[2];
 
   if (type) {

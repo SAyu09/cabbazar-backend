@@ -1,19 +1,19 @@
-// src/models/Booking.js - FIXED VERSION
+// src/models/Booking.js - FIXED VERSION with Payment Ref
 import mongoose from 'mongoose';
 import {
   BOOKING_TYPES,
   BOOKING_STATUS,
   VEHICLE_TYPES,
   USER_ROLES,
-  PAYMENT_STATUS,
-  PAYMENT_METHODS,
+  // PAYMENT_STATUS, // <-- REMOVED
+  // PAYMENT_METHODS, // <-- REMOVED
   TAX_CONFIG
 } from '../config/constants.js';
-import { generateBookingReference, calculateGST } from '../utils/helpers.js';
+import { generateBookingReference } from '../utils/helpers.js';
 
 // ------------------ Sub-schemas ------------------
 
-// FIXED: Simplified location schema - no more GeoJSON issues
+// Kept your new simplified location schema
 const locationSchema = new mongoose.Schema({
   city: {
     type: String,
@@ -24,7 +24,6 @@ const locationSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
-  // Simple lat/lng fields instead of GeoJSON (easier to work with)
   lat: {
     type: Number,
     min: -90,
@@ -128,7 +127,6 @@ const tripSchema = new mongoose.Schema({
   actualDistance: { type: Number, min: 0 },
   startOdometer: { type: Number, min: 0 },
   endOdometer: { type: Number, min: 0 },
-  // Simplified: just store lat/lng for start/end locations
   startLocation: {
     lat: Number,
     lng: Number
@@ -218,7 +216,7 @@ const bookingSchema = new mongoose.Schema({
   },
   driverId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Driver',
+    ref: 'Driver', // This correctly refs 'Driver'
     index: true,
     default: null
   },
@@ -235,24 +233,24 @@ const bookingSchema = new mongoose.Schema({
     type: fareSchema,
     required: [true, 'Fare details are required'],
   },
-  paymentStatus: {
-    type: String,
-    enum: Object.values(PAYMENT_STATUS),
-    default: PAYMENT_STATUS.PENDING,
+  
+  // --- PAYMENT FIELDS MODIFIED ---
+  paymentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Payment',
+    default: null,
   },
-  paymentMethod: {
-    type: String,
-    enum: Object.values(PAYMENT_METHODS),
-    default: PAYMENT_METHODS.CASH,
-  },
-  paymentTransactionId: { type: String, index: true },
+  // --- OLD FIELDS REMOVED ---
+  // paymentStatus: { ... },
+  // paymentMethod: { ... },
+  // paymentTransactionId: { ... },
+
   cancellation: { type: cancellationSchema, default: null },
   rating: { type: ratingSchema, default: null },
   trip: { type: tripSchema, default: null },
   metadata: { type: metadataSchema },
   specialRequests: { type: [String], default: [] },
   notes: { type: String, trim: true, maxlength: 500 },
-  promoCodeApplied: { type: String },
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -260,14 +258,11 @@ const bookingSchema = new mongoose.Schema({
 });
 
 // ------------------ Hooks ------------------
-
+// (Your existing hooks are perfect)
 bookingSchema.pre('save', async function (next) {
-  // Generate unique booking ID
   if (this.isNew && !this.bookingId) {
     this.bookingId = generateBookingReference();
   }
-  
-  // Set endDateTime for local packages
   if ([
     BOOKING_TYPES.LOCAL_2_20,
     BOOKING_TYPES.LOCAL_4_40,
@@ -283,24 +278,19 @@ bookingSchema.pre('save', async function (next) {
     }
     this.endDateTime = new Date(this.startDateTime.getTime() + durationHours * 60 * 60 * 1000);
   }
-  
   next();
 });
 
 // ------------------ Indexes ------------------
-
-// REMOVED: GeoSpatial indexes (not needed with simple lat/lng)
-// If you need geospatial queries later, you can add regular indexes:
+// (Kept your indexes)
 bookingSchema.index({ 'pickupLocation.lat': 1, 'pickupLocation.lng': 1 });
 bookingSchema.index({ 'dropLocation.lat': 1, 'dropLocation.lng': 1 });
-
-// Compound indexes for common queries
 bookingSchema.index({ userId: 1, status: 1, startDateTime: -1 });
 bookingSchema.index({ driverId: 1, status: 1, startDateTime: -1 });
 bookingSchema.index({ startDateTime: 1, status: 1 });
 
 // ------------------ Virtuals ------------------
-
+// (Kept your virtuals)
 bookingSchema.virtual('tripDurationMinutes').get(function () {
   if (this.trip?.actualStartTime && this.trip?.actualEndTime) {
     return Math.round((this.trip.actualEndTime - this.trip.actualStartTime) / (1000 * 60));
@@ -312,6 +302,6 @@ bookingSchema.virtual('tripDurationMinutes').get(function () {
 });
 
 // ------------------ Model Export ------------------
-
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;
+

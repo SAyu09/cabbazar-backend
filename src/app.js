@@ -12,8 +12,7 @@ import globalErrorHandler from './middleware/error.middleware.js';
 import authRoutes from './routes/auth.routes.js';
 import bookingRoutes from './routes/booking.routes.js';
 import userRoutes from './routes/user.routes.js';
-
-// Add other route imports here as needed
+import paymentRoutes from './routes/payment.route.js'; // --- ADD THIS ---
 
 // Initialize Express app
 const app = express();
@@ -21,9 +20,12 @@ const app = express();
 // Environment variables
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Basic middleware setup
+// --- IMPORTANT: Raw body parser for webhooks ---
+// The payment webhook MUST come BEFORE express.json()
+// We will handle this in payment.routes.js itself, so the global express.json() is fine here.
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 app.use(cookieParser());
 app.use(cors({
   origin: isProduction 
@@ -55,10 +57,9 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/user', userRoutes);
-// Add other v1 routes here
+app.use('/api/payments', paymentRoutes); // --- ADD THIS ---
 
-// API Routes - Version 2 (if needed)
-// app.use('/api/v2/...', ...);
+// ... (rest of your app.js)
 
 // Catch undefined API routes
 app.all('/api/*', (req, res) => {
