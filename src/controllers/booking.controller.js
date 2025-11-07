@@ -1,11 +1,10 @@
-// src/controllers/booking.controller.js - REFACTORED with Payment Flow
-import axios from 'axios';
+// src/controllers/booking.controller.js - COMPLETE FIXED VERSION
 import { Booking, User, Vehicle } from '../models/index.js';
-import Driver from '../models/Driver.js'; // Import Driver model
-import Payment from '../models/Payment.js'; // Import Payment model
+import Driver from '../models/Driver.js';
+import Payment from '../models/Payment.js';
 import pricingService from '../services/pricing.service.js';
 import geoService from '../services/geo.service.js';
-import paymentService from '../services/payment.service.js'; // Import Payment service
+import paymentService from '../services/payment.service.js';
 import { sendSuccess, sendPaginatedResponse } from '../utils/response.js';
 import { catchAsync } from '../utils/catchAsync.js';
 import {
@@ -22,7 +21,8 @@ import {
   PAYMENT_STATUS,
   PAYMENT_METHODS,
   VEHICLE_TYPES,
-  TAX_CONFIG
+  TAX_CONFIG,
+  DISTANCE_CONFIG
 } from '../config/constants.js';
 import {
   parsePagination,
@@ -37,15 +37,30 @@ import {
   sendDriverNotification
 } from '../utils/notification.utils.js';
 
-// --- Configuration ---
-const localRentalTypes = [
-  BOOKING_TYPES.LOCAL_2_20,
-  BOOKING_TYPES.LOCAL_4_40,
-  BOOKING_TYPES.LOCAL_8_80,
-  BOOKING_TYPES.LOCAL_12_120
+// ========================================
+// CONFIGURATION & CONSTANTS
+// ========================================
+
+const AIRPORT_KEYWORDS = [
+  'airport', 'international', 'domestic', 'terminal',
+  'agr', 'del', 'bom', 'blr', 'maa', 'ccu', 'hyd',
+  'igi', 'indira gandhi', 'chhatrapati shivaji'
 ];
 
-const AIRPORT_DISTANCES_KM = {
+const CITY_AIRPORTS = {
+  'delhi': 'indira gandhi international (del)',
+  'mumbai': 'chhatrapati shivaji (bom)',
+  'bangalore': 'kempegowda international (blr)',
+  'chennai': 'chennai international (maa)',
+  'kolkata': 'netaji subhas chandra bose (ccu)',
+  'hyderabad': 'rajiv gandhi international (hyd)',
+  'agra': 'agra airport (agr)',
+  'jaipur': 'jaipur international (jai)',
+  'pune': 'pune airport (pnq)',
+  'goa': 'dabolim airport (goi)'
+};
+
+const AIRPORT_FIXED_DISTANCES = {
   'agra_agra airport (agr)': 7,
   'agra airport (agr)_agra': 7,
   'delhi_indira gandhi international (del)': 12,
@@ -54,17 +69,111 @@ const AIRPORT_DISTANCES_KM = {
   'chhatrapati shivaji (bom)_mumbai': 15,
 };
 
+// ⭐ FIXED: Define local rental types constant
+const localRentalTypes = [
+  BOOKING_TYPES.LOCAL_2_20,
+  BOOKING_TYPES.LOCAL_4_40,
+  BOOKING_TYPES.LOCAL_8_80,
+  BOOKING_TYPES.LOCAL_12_120
+];
+
+const LOCAL_RENTAL_MAX_DISTANCE = 80; // km
+const AIRPORT_MAX_DISTANCE = 200; // km
+const OUTSTATION_MIN_DISTANCE = 50; // km
+const SHORT_DISTANCE_THRESHOLD = 50; // km
+
 // ========================================
-// HELPER FUNCTIONS
+// SMART HELPER FUNCTIONS
 // ========================================
 
+/**
+ * Check if location contains airport keywords
+ */
+function isAirportLocation(location) {
+  if (!location) return false;
+  const text = location.toLowerCase().trim();
+  return AIRPORT_KEYWORDS.some(keyword => text.includes(keyword));
+}
+
+/**
+ * Get airport for a city
+ */
+function getAirportForCity(city) {
+  if (!city) return null;
+  const normalizedCity = city.toLowerCase().trim();
+  return CITY_AIRPORTS[normalizedCity] || null;
+}
+
+/**
+ * Get fixed airport distance from lookup table
+ */
 function getAirportFixedDistance(pickup, drop) {
   if (!pickup || !drop) return null;
   const key = `${pickup.toLowerCase().trim()}_${drop.toLowerCase().trim()}`;
   const revKey = `${drop.toLowerCase().trim()}_${pickup.toLowerCase().trim()}`;
-  return AIRPORT_DISTANCES_KM[key] ?? AIRPORT_DISTANCES_KM[revKey] ?? null;
+  return AIRPORT_FIXED_DISTANCES[key] ?? AIRPORT_FIXED_DISTANCES[revKey] ?? null;
 }
 
+/**
+ * Auto-detect booking type based on locations and distance
+ */
+function autoDetectBookingType(from, to, distance) {
+  const pickupIsAirport = isAirportLocation(from);
+  const dropIsAirport = isAirportLocation(to);
+
+  // Case 1: Airport Transfer
+  if (pickupIsAirport || dropIsAirport) {
+    if (distance && distance <= AIRPORT_MAX_DISTANCE) {
+      return pickupIsAirport ? BOOKING_TYPES.AIRPORT_PICKUP : BOOKING_TYPES.AIRPORT_DROP;
+    }
+    return BOOKING_TYPES.ONE_WAY;
+  }
+
+  // Case 2: Local Rental (same city or short distance)
+  if (distance && distance <= LOCAL_RENTAL_MAX_DISTANCE) {
+    return BOOKING_TYPES.LOCAL_8_80;
+  }
+
+  // Case 3: Outstation
+  if (distance && distance >= OUTSTATION_MIN_DISTANCE) {
+    return BOOKING_TYPES.ONE_WAY;
+  }
+
+  return BOOKING_TYPES.ONE_WAY;
+}
+
+/**
+ * Get all applicable booking types for a route
+ */
+function getApplicableBookingTypes(from, to, distance) {
+  const types = [];
+  const pickupIsAirport = isAirportLocation(from);
+  const dropIsAirport = isAirportLocation(to);
+
+  // Airport transfers (if distance <= 200km)
+  if ((pickupIsAirport || dropIsAirport) && distance <= AIRPORT_MAX_DISTANCE) {
+    if (pickupIsAirport) types.push(BOOKING_TYPES.AIRPORT_PICKUP);
+    if (dropIsAirport) types.push(BOOKING_TYPES.AIRPORT_DROP);
+  }
+
+  // Local packages (if distance <= 80km and no airport)
+  if (distance <= LOCAL_RENTAL_MAX_DISTANCE && !pickupIsAirport && !dropIsAirport) {
+    types.push(BOOKING_TYPES.LOCAL_2_20);
+    types.push(BOOKING_TYPES.LOCAL_4_40);
+    types.push(BOOKING_TYPES.LOCAL_8_80);
+    types.push(BOOKING_TYPES.LOCAL_12_120);
+  }
+
+  // Outstation (always available)
+  types.push(BOOKING_TYPES.ONE_WAY);
+  types.push(BOOKING_TYPES.ROUND_TRIP);
+
+  return types;
+}
+
+/**
+ * Build location object
+ */
 function buildLocationObject(locationData) {
   if (!locationData || !locationData.city) {
     throw new BadRequestError('Location must have at least a city');
@@ -78,11 +187,11 @@ function buildLocationObject(locationData) {
 }
 
 // ========================================
-// CONTROLLER FUNCTIONS
+// MAIN SEARCH CONTROLLER
 // ========================================
 
 /**
- * @desc    Search for available cabs and get pricing
+ * @desc    Smart Search for available cabs with auto-detection
  * @route   POST /api/bookings/search
  * @access  Public
  */
@@ -92,120 +201,243 @@ export const searchCabs = catchAsync(async (req, res) => {
     to,
     date,
     type,
-    distance,
     startDateTime,
-    fromCoordinates,
-    toCoordinates
   } = req.body;
 
+  // ========================================
+  // 1. BASIC VALIDATION
+  // ========================================
   if (!from || !to) {
     throw new BadRequestError('Pickup (from) and drop-off (to) locations are required');
   }
-  if (!type || !Object.values(BOOKING_TYPES).includes(type)) {
-    throw new BadRequestError(`Invalid booking type: ${type}`);
+
+  const tripDate = new Date(date || startDateTime || Date.now());
+  if (isNaN(tripDate.getTime())) {
+    throw new BadRequestError('Invalid date format');
   }
 
-  const isLocalRental = localRentalTypes.includes(type);
-  const isAirportTransfer = [BOOKING_TYPES.AIRPORT_DROP, BOOKING_TYPES.AIRPORT_PICKUP].includes(type);
-
-  const tripDate = new Date(date || startDateTime);
-  if (isNaN(tripDate.getTime())) throw new BadRequestError('Invalid date format');
-
+  // Date range validation
   const minBookingTime = addHours(new Date(), BOOKING_CONFIG.MIN_BOOKING_HOURS_AHEAD);
   const maxBookingTime = addDays(new Date(), BOOKING_CONFIG.ADVANCE_BOOKING_DAYS);
+
   if (tripDate < minBookingTime) {
-    throw new BadRequestError(`Booking must be at least ${BOOKING_CONFIG.MIN_BOOKING_HOURS_AHEAD} hours in advance`);
+    throw new BadRequestError(
+      `Booking must be at least ${BOOKING_CONFIG.MIN_BOOKING_HOURS_AHEAD} hours in advance`
+    );
   }
   if (tripDate > maxBookingTime) {
-    throw new BadRequestError(`Cannot book more than ${BOOKING_CONFIG.ADVANCE_BOOKING_DAYS} days in advance`);
+    throw new BadRequestError(
+      `Cannot book more than ${BOOKING_CONFIG.ADVANCE_BOOKING_DAYS} days in advance`
+    );
   }
 
-  let estimatedDistance = distance;
-  let originCoords = fromCoordinates;
-  let destinationCoords = toCoordinates;
-  let distanceSource = 'user_provided';
-  let duration = 0;
+  // ========================================
+  // 2. GEOCODING & DISTANCE CALCULATION
+  // ========================================
+  let originCoords, destinationCoords, estimatedDistance, duration;
+  let distanceSource = 'not_calculated';
 
-  if (isLocalRental) {
-    estimatedDistance = 0;
-    distanceSource = 'local_package';
-  } else if (estimatedDistance && estimatedDistance > 0) {
-    distanceSource = 'user_provided_distance';
-  } else {
-    distanceSource = 'api_calculated (google)';
+  if (!geoService.isAvailable()) {
+    throw new ServiceUnavailableError(
+      'Location service is temporarily unavailable. Please try again later.'
+    );
+  }
 
-    if (!geoService.isAvailable()) {
-      throw new ServiceUnavailableError('Geocoding/Distance service is not available. Please try again later.');
+  try {
+    logger.info('Geocoding pickup location', { from });
+    originCoords = await geoService.geocode(from);
+
+    logger.info('Geocoding drop location', { to });
+    destinationCoords = await geoService.geocode(to);
+
+    // Try fixed airport distance first
+    const fixedDistance = getAirportFixedDistance(from, to);
+    if (fixedDistance) {
+      estimatedDistance = fixedDistance;
+      distanceSource = 'airport_fixed_table';
+      logger.info('Using fixed airport distance', { from, to, distance: fixedDistance });
+    } else {
+      // Calculate distance using Google Distance Matrix
+      const matrix = await geoService.getDistanceMatrix(originCoords, destinationCoords);
+      estimatedDistance = matrix.distance;
+      duration = matrix.duration;
+      distanceSource = 'google_distance_matrix';
+      logger.info('Distance calculated via Google', {
+        from,
+        to,
+        distance: estimatedDistance,
+        duration
+      });
     }
 
-    try {
-      if (!originCoords || typeof originCoords.lat !== 'number') {
-        logger.info('Geocoding origin address', { from });
-        originCoords = await geoService.geocode(from);
-      } else {
-        distanceSource = 'user_provided_coordinates';
-      }
+  } catch (error) {
+    logger.error('Geocoding/Distance calculation failed', {
+      error: error.message,
+      from,
+      to
+    });
 
-      if (!destinationCoords || typeof destinationCoords.lat !== 'number') {
-        logger.info('Geocoding destination address', { to });
-        destinationCoords = await geoService.geocode(to);
-      } else {
-        distanceSource = 'user_provided_coordinates';
-      }
-
-      if (isAirportTransfer) {
-        estimatedDistance = getAirportFixedDistance(from, to);
-        if (estimatedDistance) distanceSource = 'airport_fixed_table';
-      }
-
-      if (!estimatedDistance && originCoords && destinationCoords) {
-        const matrix = await geoService.getDistanceMatrix(originCoords, destinationCoords);
-        estimatedDistance = matrix.distance; // in KM
-        duration = matrix.duration; // in Minutes
-        distanceSource = 'api_google_matrix';
-      }
-
-    } catch (error) {
-      logger.error('Failed to get Google geo-data', { error: error.message, from, to });
-      if (originCoords && destinationCoords && !estimatedDistance) {
-        estimatedDistance = pricingService.calculateDistanceFromCoordinates(originCoords, destinationCoords);
-        distanceSource = 'api_fallback_straight_line';
-        logger.warn('Google Matrix failed, using fallback distance', { estimatedDistance });
-      } else {
-        throw new BadRequestError(`Could not determine distance: ${error.message}`);
-      }
+    // Fallback to straight-line distance
+    if (originCoords && destinationCoords) {
+      estimatedDistance = pricingService.calculateDistanceFromCoordinates(
+        originCoords,
+        destinationCoords
+      );
+      distanceSource = 'fallback_straight_line';
+      logger.warn('Using fallback distance calculation', {
+        distance: estimatedDistance
+      });
+    } else {
+      throw new ServiceUnavailableError(
+        'Unable to calculate distance. Please check your locations and try again.'
+      );
     }
   }
 
-  if (!isLocalRental && (!estimatedDistance || estimatedDistance <= 0)) {
+  // ⭐ FIXED: Validate distance only for non-local bookings
+  const isLocalRequest = type && localRentalTypes.includes(type);
+
+  if (!isLocalRequest && (!estimatedDistance || estimatedDistance <= 0)) {
     throw new BadRequestError('Could not determine a valid distance for this route.');
   }
 
-  const vehicleOptions = pricingService.getVehicleOptions(type, {
-    distance: estimatedDistance,
+  // ========================================
+  // 3. AUTO-DETECT OR VALIDATE BOOKING TYPE
+  // ========================================
+  let detectedType = autoDetectBookingType(from, to, estimatedDistance || 0);
+  let bookingType = type || detectedType;
+  let typeAutoDetected = !type;
+  let typeChangedWarning = null;
+
+  // Get all applicable types for this route
+  const applicableTypes = getApplicableBookingTypes(from, to, estimatedDistance || 0);
+
+  // Validate user-provided type
+  if (type && !Object.values(BOOKING_TYPES).includes(type)) {
+    throw new BadRequestError(`Invalid booking type: ${type}`);
+  }
+
+  // Check if user's selected type is applicable
+  if (type && !applicableTypes.includes(type)) {
+    logger.warn('User selected type not applicable, auto-correcting', {
+      selectedType: type,
+      detectedType,
+      distance: estimatedDistance
+    });
+
+    bookingType = detectedType;
+    typeChangedWarning = {
+      message: `${type} is not available for this route (distance: ${(estimatedDistance || 0).toFixed(1)} km). Showing ${detectedType} options instead.`,
+      originalType: type,
+      correctedType: detectedType,
+      reason: 'TYPE_NOT_APPLICABLE_FOR_DISTANCE',
+      availableTypes: applicableTypes
+    };
+  }
+
+  // ========================================
+  // 4. GET VEHICLE OPTIONS & PRICING
+  // ========================================
+  const isLocalBooking = localRentalTypes.includes(bookingType);
+
+  const vehicleOptions = pricingService.getVehicleOptions(bookingType, {
+    distance: isLocalBooking ? 0 : (estimatedDistance || 0),
     startDateTime: tripDate
   });
 
+  // ========================================
+  // 5. BUILD RESPONSE
+  // ========================================
   const searchResults = {
     searchId: generateBookingReference(),
     from,
     to,
+    fromCoordinates: originCoords,
+    toCoordinates: destinationCoords,
     date: tripDate,
-    type,
-    distance: estimatedDistance,
-    durationMinutes: duration > 0 ? duration : null,
+    distance: isLocalBooking ? null : estimatedDistance,
+    durationMinutes: duration || null,
     distanceSource,
-    originCoords,
-    destinationCoords,
+    bookingType,
+    detectedType,
+    typeAutoDetected,
+    applicableTypes,
+    warning: typeChangedWarning,
+    isAirportRoute: isAirportLocation(from) || isAirportLocation(to),
+    isLocalRoute: (estimatedDistance || 0) <= LOCAL_RENTAL_MAX_DISTANCE,
+    isOutstationRoute: (estimatedDistance || 0) >= OUTSTATION_MIN_DISTANCE,
     options: vehicleOptions,
     validUntil: addHours(new Date(), 1),
     timestamp: new Date(),
   };
 
-  logger.info('Search successful (Google)', { searchId: searchResults.searchId, distance: estimatedDistance, source: distanceSource });
-  return sendSuccess(res, searchResults, 'Search results retrieved successfully', 200);
+  logger.info('Smart search completed', {
+    searchId: searchResults.searchId,
+    from,
+    to,
+    distance: estimatedDistance,
+    bookingType,
+    typeAutoDetected,
+    optionsCount: vehicleOptions.length
+  });
+
+  return sendSuccess(
+    res,
+    searchResults,
+    'Search results retrieved successfully',
+    200
+  );
 });
 
+// ========================================
+// GET APPLICABLE TYPES ENDPOINT
+// ========================================
+
+/**
+ * @desc    Get applicable booking types for a route (without pricing)
+ * @route   POST /api/bookings/applicable-types
+ * @access  Public
+ */
+export const getApplicableTypes = catchAsync(async (req, res) => {
+  const { from, to } = req.body;
+
+  if (!from || !to) {
+    throw new BadRequestError('Pickup and drop-off locations are required');
+  }
+
+  if (!geoService.isAvailable()) {
+    throw new ServiceUnavailableError('Location service is temporarily unavailable');
+  }
+
+  try {
+    const originCoords = await geoService.geocode(from);
+    const destinationCoords = await geoService.geocode(to);
+    const matrix = await geoService.getDistanceMatrix(originCoords, destinationCoords);
+    const distance = matrix.distance;
+
+    const types = getApplicableBookingTypes(from, to, distance);
+    const recommended = autoDetectBookingType(from, to, distance);
+
+    return sendSuccess(res, {
+      from,
+      to,
+      distance,
+      applicableTypes: types,
+      recommendedType: recommended,
+      isAirportRoute: isAirportLocation(from) || isAirportLocation(to),
+      isLocalRoute: distance <= LOCAL_RENTAL_MAX_DISTANCE,
+      isOutstationRoute: distance >= OUTSTATION_MIN_DISTANCE
+    }, 'Applicable booking types retrieved', 200);
+
+  } catch (error) {
+    logger.error('Error getting applicable types', { error: error.message });
+    throw new ServiceUnavailableError('Unable to determine applicable booking types');
+  }
+});
+
+// ========================================
+// CREATE BOOKING
+// ========================================
 
 /**
  * @desc    Step 1: Create a booking order (Cash or Online)
@@ -217,7 +449,7 @@ export const createBooking = catchAsync(async (req, res) => {
     bookingType,
     pickupLocation,
     dropLocation,
-    viaLocations, // <-- ADDED VIA LOCATIONS
+    viaLocations,
     startDateTime,
     endDateTime,
     vehicleType,
@@ -225,8 +457,8 @@ export const createBooking = catchAsync(async (req, res) => {
     specialRequests,
     notes,
     searchId,
-    distance, // Distance from searchCabs
-    paymentMethod = 'RAZORPAY', // 'CASH' or 'RAZORPAY'
+    distance,
+    paymentMethod = 'RAZORPAY',
   } = req.body;
 
   // ========================================
@@ -273,29 +505,34 @@ export const createBooking = catchAsync(async (req, res) => {
       email: passengerDetails.email?.trim().toLowerCase() || null
     };
   } else if (!req.user.name) {
-    throw new BadRequestError('Passenger name is required. Please provide passengerDetails or update your profile name.');
+    throw new BadRequestError('Passenger name is required.');
   }
 
   // ========================================
-  // 2. SERVER-SIDE FARE CALCULATION (CRITICAL)
+  // 2. SERVER-SIDE FARE CALCULATION
   // ========================================
   let estimatedDistance = distance;
   let fareDetails;
 
   try {
-    // If distance is not provided by client, recalculate it
-    if (!isLocalRental && (!estimatedDistance || estimatedDistance <= 0)) {
+    // ⭐ FIXED: For local rentals, distance should be 0
+    if (isLocalRental) {
+      estimatedDistance = 0;
+    } else if (!estimatedDistance || estimatedDistance <= 0) {
       if (!geoService.isAvailable()) {
         throw new ServiceUnavailableError('Geo-service not available to verify fare.');
       }
       logger.warn('Distance not provided by client. Recalculating...', { bookingType });
-      const origin = pickupLocation.lat ? { lat: pickupLocation.lat, lng: pickupLocation.lng } : (pickupLocation.address || pickupLocation.city);
-      const dest = dropLocation.lat ? { lat: dropLocation.lat, lng: dropLocation.lng } : (dropLocation.address || dropLocation.city);
+      const origin = pickupLocation.lat ?
+        { lat: pickupLocation.lat, lng: pickupLocation.lng } :
+        (pickupLocation.address || pickupLocation.city);
+      const dest = dropLocation.lat ?
+        { lat: dropLocation.lat, lng: dropLocation.lng } :
+        (dropLocation.address || dropLocation.city);
       const matrix = await geoService.getDistanceMatrix(origin, dest);
       estimatedDistance = matrix.distance;
     }
 
-    // Get the *single* fare option
     const options = pricingService.getVehicleOptions(bookingType, {
       distance: estimatedDistance || 0,
       startDateTime: tripDate
@@ -315,13 +552,14 @@ export const createBooking = catchAsync(async (req, res) => {
   if (finalAmount <= 0) {
     throw new BadRequestError('Calculated fare is zero or negative. Cannot proceed.');
   }
-  const amountInPaise = Math.round(finalAmount * 100);
+  const amountInPaise = finalAmount * 100;
 
   // Build locations
   const cleanPickupLocation = buildLocationObject(pickupLocation);
-  const cleanDropLocation = isLocalRental ? buildLocationObject(dropLocation || pickupLocation) : buildLocationObject(dropLocation);
+  const cleanDropLocation = isLocalRental ?
+    buildLocationObject(dropLocation || pickupLocation) :
+    buildLocationObject(dropLocation);
 
-  // Build via locations
   const cleanViaLocations = (viaLocations || [])
     .filter(loc => loc && loc.city)
     .map(loc => buildLocationObject(loc));
@@ -334,29 +572,33 @@ export const createBooking = catchAsync(async (req, res) => {
     bookingType,
     pickupLocation: cleanPickupLocation,
     dropLocation: cleanDropLocation,
-    viaLocations: cleanViaLocations, // <-- ADDED
+    viaLocations: cleanViaLocations,
     startDateTime: tripDate,
     endDateTime: endDateTime ? new Date(endDateTime) : null,
     vehicleType,
     passengerDetails: finalPassengerDetails,
-    fareDetails, // Use the *server-calculated* fare
-    status: BOOKING_STATUS.PENDING, // <-- PENDING
+    fareDetails,
+    status: BOOKING_STATUS.PENDING,
     specialRequests: Array.isArray(specialRequests) ? specialRequests : [],
     notes: notes || null,
-    metadata: { source: req.headers['x-app-source'] || 'API', ipAddress: req.ip, userAgent: req.get('user-agent'), searchId }
+    metadata: {
+      source: req.headers['x-app-source'] || 'API',
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+      searchId
+    }
   });
   await booking.save();
 
   const payment = new Payment({
     userId: req.user._id,
     bookingId: booking._id,
-    amount: finalAmount, // Store final amount
+    amount: finalAmount,
     currency: 'INR',
     status: PAYMENT_STATUS.PENDING,
   });
   await payment.save();
 
-  // Link payment to booking
   booking.paymentId = payment._id;
   await booking.save();
 
@@ -367,18 +609,17 @@ export const createBooking = catchAsync(async (req, res) => {
   });
 
   // ========================================
-  // 4. HANDLE PAYMENT METHOD (Online vs. Cash)
+  // 4. HANDLE PAYMENT METHOD
   // ========================================
   if (paymentMethod === PAYMENT_METHODS.CASH) {
     payment.method = PAYMENT_METHODS.CASH;
-    booking.status = BOOKING_STATUS.CONFIRMED; // Confirm booking immediately
+    booking.status = BOOKING_STATUS.CONFIRMED;
 
     await payment.save();
     await booking.save();
 
-    logger.info('Booking confirmed with CASH (Pay Later)', { bookingId: booking.bookingId });
+    logger.info('Booking confirmed with CASH', { bookingId: booking.bookingId });
 
-    // Send notifications
     const user = await User.findById(req.user._id).select('deviceInfo');
     if (user?.deviceInfo?.length > 0) {
       const fcmToken = user.deviceInfo[0].fcmToken;
@@ -387,9 +628,9 @@ export const createBooking = catchAsync(async (req, res) => {
           fcmToken,
           booking.bookingId,
           'confirmed',
-          `Your cash booking ${booking.bookingId} is confirmed. Please pay the driver at trip end.`
+          `Your cash booking ${booking.bookingId} is confirmed. Pay driver at trip end.`
         ).catch(error => {
-          logger.error('Failed to send cash booking confirmation push notification', {
+          logger.error('Failed to send notification', {
             bookingId: booking.bookingId,
             error: error.message,
           });
@@ -402,15 +643,15 @@ export const createBooking = catchAsync(async (req, res) => {
       {
         booking: booking.toObject({ virtuals: true }),
         payment: payment.toObject(),
-        message: 'Booking confirmed! Please pay the driver at the end of your trip.',
+        message: 'Booking confirmed! Pay the driver at trip end.',
       },
       'Booking confirmed (Pay Later)',
       201
     );
 
   } else {
-    // --- ONLINE PAYMENT FLOW (Razorpay) ---
-    payment.method = PAYMENT_METHODS.UPI; // Default for online, can be updated by webhook
+    // ONLINE PAYMENT (Razorpay)
+    payment.method = PAYMENT_METHODS.UPI;
     const receiptId = `receipt_${booking.bookingId}`;
     const notes = {
       bookingDbId: booking._id.toString(),
@@ -441,7 +682,7 @@ export const createBooking = catchAsync(async (req, res) => {
         },
       },
       'Booking order created. Please proceed to payment.',
-      200 // 200 OK
+      200
     );
   }
 });

@@ -1,7 +1,7 @@
-// src/services/pricing.service.js - Updated for new constants.js
+// src/services/pricing.service.js - FIXED for all distance ranges
 import {
   PRICING,
-  LOCAL_PACKAGES, // Using new LOCAL_PACKAGES
+  LOCAL_PACKAGES,
   AIRPORT_BASE_PRICE,
   BOOKING_TYPES,
   VEHICLE_TYPES,
@@ -11,7 +11,6 @@ import {
   DISTANCE_CONFIG,
   BOOKING_CONFIG,
 } from '../config/constants.js';
-// (Assuming these helpers exist)
 import { BadRequestError } from '../utils/customError.js';
 import { calculateGST, isNightTime } from '../utils/helpers.js';
 import logger from '../config/logger.js';
@@ -24,7 +23,7 @@ class PricingService {
 
   /**
    * Calculate fare for outstation trips (one-way or round trip)
-   * (No changes needed, uses PRICING)
+   * UPDATED: Removed strict 50km minimum, uses minFare instead
    */
   calculateOutstationFare(vehicleType, distance, isRoundTrip = false, startDateTime = new Date()) {
     try {
@@ -44,16 +43,16 @@ class PricingService {
       if (typeof distance !== 'number' || isNaN(distance) || distance <= 0) {
         throw new BadRequestError('Distance must be a valid positive number');
       }
-      // Using MIN_DISTANCE from new constants
-      if (distance < DISTANCE_CONFIG.MIN_DISTANCE) { 
-        throw new BadRequestError(`Minimum distance for outstation booking is ${DISTANCE_CONFIG.MIN_DISTANCE} km.`);
-      }
+      
+      // UPDATED: Only check maximum distance, not minimum
       if (distance > DISTANCE_CONFIG.MAX_DISTANCE) {
         throw new BadRequestError(`Maximum distance per booking is ${DISTANCE_CONFIG.MAX_DISTANCE} km.`);
       }
+      
       if (typeof isRoundTrip !== 'boolean') {
         throw new BadRequestError('isRoundTrip must be a boolean value');
       }
+      
       let tripDate;
       try {
         tripDate = new Date(startDateTime);
@@ -61,6 +60,7 @@ class PricingService {
       } catch (error) {
         throw new BadRequestError('Invalid start date/time format');
       }
+      
       const maxFutureDate = new Date(Date.now() + BOOKING_CONFIG.ADVANCE_BOOKING_DAYS * 24 * 60 * 60 * 1000);
       if (tripDate > maxFutureDate) {
         throw new BadRequestError(`Cannot book more than ${BOOKING_CONFIG.ADVANCE_BOOKING_DAYS} days in advance`);
@@ -72,21 +72,27 @@ class PricingService {
       const rates = PRICING[normalizedVehicleType];
       const multiplier = isRoundTrip ? 2 : 1;
       const totalDistance = Math.round(distance * multiplier * 10) / 10;
+      
       let baseFare = totalDistance * rates.perKmRate;
       const minFareToApply = isRoundTrip ? rates.minFare * 1.5 : rates.minFare;
-      if (baseFare < minFareToApply) {
+      
+      // Apply minimum fare if calculated fare is too low
+      const minFareApplied = baseFare < minFareToApply;
+      if (minFareApplied) {
         baseFare = minFareToApply;
       }
+      
       let nightCharges = 0;
       const isNight = isNightTime(tripDate);
       if (isNight) {
-        // Using nightChargeMultiplier from new PRICING
-        nightCharges = baseFare * (rates.nightChargeMultiplier - 1); 
+        nightCharges = baseFare * (rates.nightChargeMultiplier - 1);
       }
+      
       const subtotal = baseFare + nightCharges;
       const gst = calculateGST(subtotal, TAX_CONFIG.GST_RATE);
       const totalFare = subtotal;
       const finalAmount = subtotal + gst;
+      
       const avgSpeed = DISTANCE_CONFIG.AVERAGE_SPEED_HIGHWAY;
       const estimatedHours = (totalDistance / avgSpeed).toFixed(1);
 
@@ -106,30 +112,64 @@ class PricingService {
         totalFare: Math.round(totalFare),
         finalAmount: Math.round(finalAmount),
         perKmRate: rates.perKmRate,
-        minFareApplied: baseFare === minFareToApply,
+        minFareApplied,
         estimatedTravelTime: `${estimatedHours} hours`,
         validUntil: new Date(Date.now() + 60 * 60 * 1000),
-        inclusions: ['Driver allowance', 'Fuel charges included', 'Base fare', 'GST included', isRoundTrip ? 'Return journey included' : null].filter(Boolean),
-        exclusions: ['Toll charges (paid separately)', 'Parking charges (if any)', 'State permit charges (if applicable)', 'Extra km beyond package (if exceeded)'],
+        inclusions: [
+          'Driver allowance',
+          'Fuel charges included',
+          'Base fare',
+          'GST included',
+          isRoundTrip ? 'Return journey included' : null
+        ].filter(Boolean),
+        exclusions: [
+          'Toll charges (paid separately)',
+          'Parking charges (if any)',
+          'State permit charges (if applicable)',
+          'Extra km beyond package (if exceeded)'
+        ],
         breakdown: {
-          calculation: `${totalDistance} km × ₹${rates.perKmRate}/km = ₹${Math.round(baseFare)}`,
-          nightCharges: nightCharges > 0 ? `Night charges (${(rates.nightChargeMultiplier - 1) * 100}%) = ₹${Math.round(nightCharges)}` : null,
+          calculation: minFareApplied 
+            ? `Minimum fare applied = ₹${Math.round(baseFare)}` 
+            : `${totalDistance} km × ₹${rates.perKmRate}/km = ₹${Math.round(baseFare)}`,
+          nightCharges: nightCharges > 0 
+            ? `Night charges (${(rates.nightChargeMultiplier - 1) * 100}%) = ₹${Math.round(nightCharges)}` 
+            : null,
           gst: `GST (${TAX_CONFIG.GST_RATE * 100}%) = ₹${Math.round(gst)}`,
           total: `Total Amount = ₹${Math.round(finalAmount)}`
         },
-        tripDetails: { startTime: tripDate.toISOString(), isRoundTrip, distance: totalDistance, estimatedDuration: estimatedHours }
+        tripDetails: {
+          startTime: tripDate.toISOString(),
+          isRoundTrip,
+          distance: totalDistance,
+          estimatedDuration: estimatedHours
+        }
       };
-      logger.info('Outstation fare calculated', { vehicleType: normalizedVehicleType, distance: totalDistance, isRoundTrip, isNight, finalAmount: fareData.finalAmount });
+      
+      logger.info('Outstation fare calculated', {
+        vehicleType: normalizedVehicleType,
+        distance: totalDistance,
+        isRoundTrip,
+        isNight,
+        minFareApplied,
+        finalAmount: fareData.finalAmount
+      });
+      
       return fareData;
+      
     } catch (error) {
-      logger.error('Error in calculateOutstationFare', { error: error.message, vehicleType, distance, isRoundTrip });
+      logger.error('Error in calculateOutstationFare', {
+        error: error.message,
+        vehicleType,
+        distance,
+        isRoundTrip
+      });
       throw error;
     }
   }
 
   /**
-   * Calculate fare for local rental packages (Updated Logic)
-   * Ab ye packageType string ('8_80') leta hai aur naye LOCAL_PACKAGES structure ko use karta hai
+   * Calculate fare for local rental packages
    */
   calculateLocalPackageFare(vehicleType, packageType, extras = {}) {
     try {
@@ -144,15 +184,13 @@ class PricingService {
 
       if (!packageType) throw new BadRequestError('Package type (e.g., 8_80) is required');
       
-      // Naye LOCAL_PACKAGES se details nikalo (e.g., LOCAL_PACKAGES['8_80'])
       const pkg = LOCAL_PACKAGES[packageType];
       if (!pkg) {
         throw new BadRequestError(`Invalid package type: ${packageType}.`);
       }
 
-      // Naya structure (lowercase keys)
-      const vehicleKey = normalizedVehicleType.toLowerCase(); // 'SEDAN' -> 'sedan'
-      const baseFare = pkg[vehicleKey]; // e.g., pkg['sedan'] (1499)
+      const vehicleKey = normalizedVehicleType.toLowerCase();
+      const baseFare = pkg[vehicleKey];
       
       if (!baseFare) {
         throw new BadRequestError(`Vehicle type ${normalizedVehicleType} not available for package ${packageType}`);
@@ -162,21 +200,29 @@ class PricingService {
       let extraKm = 0;
       let extraHours = 0;
       if (extras && extras.extraKm !== undefined) {
-        if (typeof extras.extraKm !== 'number' || extras.extraKm < 0) throw new BadRequestError('Extra km must be a positive number');
-        if (extras.extraKm > 500) throw new BadRequestError('Extra km cannot exceed 500 km');
+        if (typeof extras.extraKm !== 'number' || extras.extraKm < 0) {
+          throw new BadRequestError('Extra km must be a positive number');
+        }
+        if (extras.extraKm > 500) {
+          throw new BadRequestError('Extra km cannot exceed 500 km');
+        }
         extraKm = extras.extraKm;
       }
       if (extras && extras.extraHours !== undefined) {
-        if (typeof extras.extraHours !== 'number' || extras.extraHours < 0) throw new BadRequestError('Extra hours must be a positive number');
-        if (extras.extraHours > 12) throw new BadRequestError('Extra hours cannot exceed 12 hours');
+        if (typeof extras.extraHours !== 'number' || extras.extraHours < 0) {
+          throw new BadRequestError('Extra hours must be a positive number');
+        }
+        if (extras.extraHours > 12) {
+          throw new BadRequestError('Extra hours cannot exceed 12 hours');
+        }
         extraHours = extras.extraHours;
       }
 
       // ========================================
-      // PRICING CALCULATION (Updated Structure)
+      // PRICING CALCULATION
       // ========================================
-      const extraKmRate = pkg.extraKmCharge[vehicleKey]; // e.g., pkg.extraKmCharge['sedan']
-      const extraHourRate = pkg.extraHourCharge[vehicleKey]; // e.g., pkg.extraHourCharge['sedan']
+      const extraKmRate = pkg.extraKmCharge[vehicleKey];
+      const extraHourRate = pkg.extraHourCharge[vehicleKey];
 
       const extraKmCharge = extraKm > 0 ? extraKm * extraKmRate : 0;
       const extraHourCharge = extraHours > 0 ? extraHours * extraHourRate : 0;
@@ -185,14 +231,21 @@ class PricingService {
       const gst = calculateGST(subtotal, TAX_CONFIG.GST_RATE);
       const finalAmount = subtotal + gst;
 
+      // Map packageType to BOOKING_TYPES
+      const bookingTypeMap = {
+        '2_20': BOOKING_TYPES.LOCAL_2_20,
+        '4_40': BOOKING_TYPES.LOCAL_4_40,
+        '8_80': BOOKING_TYPES.LOCAL_8_80,
+        '12_120': BOOKING_TYPES.LOCAL_12_120
+      };
+
       // ========================================
       // RESPONSE DATA
       // ========================================
       const fareData = {
         vehicleType: normalizedVehicleType,
-        // Naye BOOKING_TYPES ke hisab se bookingType set karo
-        bookingType: packageType === '8_80' ? BOOKING_TYPES.LOCAL_8_80 : BOOKING_TYPES.LOCAL_12_120,
-        packageType, // '8_80' ya '12_120'
+        bookingType: bookingTypeMap[packageType] || BOOKING_TYPES.LOCAL_8_80,
+        packageType,
         baseFare,
         packageDetails: {
           hours: pkg.hours,
@@ -213,8 +266,21 @@ class PricingService {
         extraKmRate: extraKmRate,
         extraHourRate: extraHourRate,
         validUntil: new Date(Date.now() + 60 * 60 * 1000),
-        inclusions: [`${pkg.hours} hours included`, `${pkg.km} kilometers included`, 'Fuel charges included', 'Driver allowance included', 'GST included', 'Local sightseeing perfect'],
-        exclusions: ['Toll charges', 'Parking charges', `Extra km: ₹${extraKmRate}/km after ${pkg.km} km`, `Extra hour: ₹${extraHourRate}/hr after ${pkg.hours} hours`, 'Interstate travel charges (if applicable)'],
+        inclusions: [
+          `${pkg.hours} hours included`,
+          `${pkg.km} kilometers included`,
+          'Fuel charges included',
+          'Driver allowance included',
+          'GST included',
+          'Local sightseeing perfect'
+        ],
+        exclusions: [
+          'Toll charges',
+          'Parking charges',
+          `Extra km: ₹${extraKmRate}/km after ${pkg.km} km`,
+          `Extra hour: ₹${extraHourRate}/hr after ${pkg.hours} hours`,
+          'Interstate travel charges (if applicable)'
+        ],
         breakdown: {
           packageCharge: `${pkg.hours}hrs/${pkg.km}km Package = ₹${baseFare}`,
           extraKm: extraKmCharge > 0 ? `Extra ${extraKm} km × ₹${extraKmRate} = ₹${Math.round(extraKmCharge)}` : null,
@@ -223,17 +289,29 @@ class PricingService {
           total: `Total Amount = ₹${Math.round(finalAmount)}`
         }
       };
-      logger.info('Local package fare calculated', { vehicleType: normalizedVehicleType, packageType: packageType, extraKm, extraHours, finalAmount: fareData.finalAmount });
+      
+      logger.info('Local package fare calculated', {
+        vehicleType: normalizedVehicleType,
+        packageType,
+        extraKm,
+        extraHours,
+        finalAmount: fareData.finalAmount
+      });
+      
       return fareData;
+      
     } catch (error) {
-      logger.error('Error in calculateLocalPackageFare', { error: error.message, vehicleType, packageType });
+      logger.error('Error in calculateLocalPackageFare', {
+        error: error.message,
+        vehicleType,
+        packageType
+      });
       throw error;
     }
   }
 
   /**
    * Calculate fare for airport transfers
-   * (Uses new DISTANCE_CONFIG)
    */
   calculateAirportFare(vehicleType, distance, startDateTime = new Date()) {
     try {
@@ -252,6 +330,7 @@ class PricingService {
       if (distance > 200) {
         throw new BadRequestError('Airport transfers are only for distances up to 200 km.');
       }
+      
       let tripDate;
       try {
         tripDate = new Date(startDateTime);
@@ -263,20 +342,20 @@ class PricingService {
       // ========================================
       // PRICING CALCULATION
       // ========================================
-      // Using FREE_KM_FOR_AIRPORT from new constants
-      const freeKm = DISTANCE_CONFIG.FREE_KM_FOR_AIRPORT; 
+      const freeKm = DISTANCE_CONFIG.FREE_KM_FOR_AIRPORT;
       const extraKm = Math.max(0, distance - freeKm);
       const extraKmCharge = extraKm * PRICING[normalizedVehicleType].perKmRate;
       let baseFare = basePrice + extraKmCharge;
+      
       let nightCharges = 0;
       const isNight = isNightTime(tripDate);
       if (isNight) {
         nightCharges = baseFare * (PRICING[normalizedVehicleType].nightChargeMultiplier - 1);
       }
+      
       const subtotal = baseFare + nightCharges;
       const gst = calculateGST(subtotal, TAX_CONFIG.GST_RATE);
       const finalAmount = subtotal + gst;
-      // Using AVERAGE_SPEED_CITY from new constants
       const estimatedMinutes = Math.round((distance / DISTANCE_CONFIG.AVERAGE_SPEED_CITY) * 60);
 
       // ========================================
@@ -284,7 +363,7 @@ class PricingService {
       // ========================================
       const fareData = {
         vehicleType: normalizedVehicleType,
-        bookingType: 'AIRPORT_TRANSFER', // Generic type
+        bookingType: 'AIRPORT_TRANSFER',
         baseFare: Math.round(baseFare),
         basePrice,
         distance: Math.round(distance * 10) / 10,
@@ -301,29 +380,59 @@ class PricingService {
         perKmRate: PRICING[normalizedVehicleType].perKmRate,
         estimatedTravelTime: `${estimatedMinutes} minutes`,
         validUntil: new Date(Date.now() + 60 * 60 * 1000),
-        inclusions: ['Airport pickup/drop', `First ${freeKm} km included`, 'Driver allowance', 'Fuel charges', 'GST included', 'Meet & Greet service'],
-        exclusions: ['Toll charges (paid separately)', 'Parking charges at airport', `Extra km beyond ${freeKm} km: ₹${PRICING[normalizedVehicleType].perKmRate}/km`, 'Waiting charges after 30 minutes'],
+        inclusions: [
+          'Airport pickup/drop',
+          `First ${freeKm} km included`,
+          'Driver allowance',
+          'Fuel charges',
+          'GST included',
+          'Meet & Greet service'
+        ],
+        exclusions: [
+          'Toll charges (paid separately)',
+          'Parking charges at airport',
+          `Extra km beyond ${freeKm} km: ₹${PRICING[normalizedVehicleType].perKmRate}/km`,
+          'Waiting charges after 30 minutes'
+        ],
         breakdown: {
           basePrice: `Base charge = ₹${basePrice}`,
           freeKm: `First ${freeKm} km included`,
-          extraKm: extraKm > 0 ? `Extra ${Math.round(extraKm * 10) / 10} km × ₹${PRICING[normalizedVehicleType].perKmRate} = ₹${Math.round(extraKmCharge)}` : 'No extra km',
-          nightCharges: nightCharges > 0 ? `Night charges (${(PRICING[normalizedVehicleType].nightChargeMultiplier - 1) * 100}%) = ₹${Math.round(nightCharges)}` : null,
+          extraKm: extraKm > 0 
+            ? `Extra ${Math.round(extraKm * 10) / 10} km × ₹${PRICING[normalizedVehicleType].perKmRate} = ₹${Math.round(extraKmCharge)}` 
+            : 'No extra km',
+          nightCharges: nightCharges > 0 
+            ? `Night charges (${(PRICING[normalizedVehicleType].nightChargeMultiplier - 1) * 100}%) = ₹${Math.round(nightCharges)}` 
+            : null,
           gst: `GST (${TAX_CONFIG.GST_RATE * 100}%) = ₹${Math.round(gst)}`,
           total: `Total Amount = ₹${Math.round(finalAmount)}`
         },
-        tripDetails: { startTime: tripDate.toISOString(), estimatedDuration: `${estimatedMinutes} minutes` }
+        tripDetails: {
+          startTime: tripDate.toISOString(),
+          estimatedDuration: `${estimatedMinutes} minutes`
+        }
       };
-      logger.info('Airport fare calculated', { vehicleType: normalizedVehicleType, distance, isNight, finalAmount: fareData.finalAmount });
+      
+      logger.info('Airport fare calculated', {
+        vehicleType: normalizedVehicleType,
+        distance,
+        isNight,
+        finalAmount: fareData.finalAmount
+      });
+      
       return fareData;
+      
     } catch (error) {
-      logger.error('Error in calculateAirportFare', { error: error.message, vehicleType, distance });
+      logger.error('Error in calculateAirportFare', {
+        error: error.message,
+        vehicleType,
+        distance
+      });
       throw error;
     }
   }
 
   /**
-   * Get all vehicle options with complete pricing (Updated Logic)
-   * Ab ye 2 naye local package types (LOCAL_8_80, LOCAL_12_120) ko handle karta hai
+   * Get all vehicle options with complete pricing
    */
   getVehicleOptions(bookingType, params) {
     try {
@@ -334,7 +443,7 @@ class PricingService {
         throw new BadRequestError(`Invalid booking type: ${bookingType}.`);
       }
 
-      // Distance required types (local isme nahi hai)
+      // Distance required types
       const requiresDistance = [
         BOOKING_TYPES.ONE_WAY,
         BOOKING_TYPES.ROUND_TRIP,
@@ -359,17 +468,24 @@ class PricingService {
             case BOOKING_TYPES.ONE_WAY:
               fareDetails = this.calculateOutstationFare(vehicleType, params.distance, false, startDateTime);
               break;
+              
             case BOOKING_TYPES.ROUND_TRIP:
               fareDetails = this.calculateOutstationFare(vehicleType, params.distance, true, startDateTime);
               break;
             
-            // Naye local packages ke liye cases
+            case BOOKING_TYPES.LOCAL_2_20:
+              fareDetails = this.calculateLocalPackageFare(vehicleType, '2_20', params.extras);
+              break;
+              
+            case BOOKING_TYPES.LOCAL_4_40:
+              fareDetails = this.calculateLocalPackageFare(vehicleType, '4_40', params.extras);
+              break;
+              
             case BOOKING_TYPES.LOCAL_8_80:
-              // String '8_80' pass karo
               fareDetails = this.calculateLocalPackageFare(vehicleType, '8_80', params.extras);
               break;
+              
             case BOOKING_TYPES.LOCAL_12_120:
-              // String '12_120' pass karo
               fareDetails = this.calculateLocalPackageFare(vehicleType, '12_120', params.extras);
               break;
 
@@ -399,7 +515,6 @@ class PricingService {
           });
 
         } catch (error) {
-          // Error log karo (e.g., PREMIUM_SEDAN 8_80 package me nahi hai, etc.)
           logger.debug(`Skipping ${vehicleType} for ${bookingType}: ${error.message}`);
         }
       });
@@ -429,48 +544,90 @@ class PricingService {
     }
   }
 
-  // --- Helper methods (using new constants) ---
+  // Helper methods
+  getVehicleCapacity(vehicleType) {
+    return VEHICLE_CAPACITY[vehicleType] || { passengers: 4, luggage: 2 };
+  }
   
-  getVehicleCapacity(vehicleType) { return VEHICLE_CAPACITY[vehicleType] || { passengers: 4, luggage: 2 }; }
-  getVehicleFeatures(vehicleType) { return VEHICLE_FEATURES[vehicleType] || ['AC', 'Music System']; }
+  getVehicleFeatures(vehicleType) {
+    return VEHICLE_FEATURES[vehicleType] || ['AC', 'Music System'];
+  }
+  
   getVehicleModelExamples(vehicleType) {
-    const models = { HATCHBACK: ['Maruti Swift', 'Hyundai i20'], SEDAN: ['Honda City', 'Maruti Ciaz'], SUV: ['Toyota Innova', 'Maruti Ertiga'], PREMIUM_SEDAN: ['Honda Accord', 'Toyota Camry'] };
+    const models = {
+      HATCHBACK: ['Maruti Swift', 'Hyundai i20'],
+      SEDAN: ['Honda City', 'Maruti Ciaz'],
+      SUV: ['Toyota Innova', 'Maruti Ertiga'],
+      PREMIUM_SEDAN: ['Honda Accord', 'Toyota Camry']
+    };
     return models[vehicleType] || [];
   }
+  
   getVehicleDisplayName(vehicleType) {
-    const names = { HATCHBACK: 'AC Hatchback', SEDAN: 'AC Sedan', SUV: 'AC SUV / MUV', PREMIUM_SEDAN: 'Premium Sedan' };
+    const names = {
+      HATCHBACK: 'AC Hatchback',
+      SEDAN: 'AC Sedan',
+      SUV: 'AC SUV / MUV',
+      PREMIUM_SEDAN: 'Premium Sedan'
+    };
     return names[vehicleType] || vehicleType;
   }
+  
   getVehicleDescription(vehicleType) {
-    const descriptions = { HATCHBACK: 'Economical for short trips', SEDAN: 'Comfortable for city and outstation', SUV: 'Spacious for families and groups', PREMIUM_SEDAN: 'Luxury travel experience' };
+    const descriptions = {
+      HATCHBACK: 'Economical for short trips',
+      SEDAN: 'Comfortable for city and outstation',
+      SUV: 'Spacious for families and groups',
+      PREMIUM_SEDAN: 'Luxury travel experience'
+    };
     return descriptions[vehicleType] || '';
   }
+  
   getBestForDescription(vehicleType) {
-    const bestFor = { HATCHBACK: 'Solo travelers & couples', SEDAN: 'Small families & business', SUV: 'Large families & groups', PREMIUM_SEDAN: 'Luxury seekers' };
+    const bestFor = {
+      HATCHBACK: 'Solo travelers & couples',
+      SEDAN: 'Small families & business',
+      SUV: 'Large families & groups',
+      PREMIUM_SEDAN: 'Luxury seekers'
+    };
     return bestFor[vehicleType] || '';
   }
 
   calculateDistanceFromCoordinates(origin, destination) {
     try {
-      if (!origin || !destination || typeof origin.lat !== 'number' || typeof origin.lng !== 'number' || typeof destination.lat !== 'number' || typeof destination.lng !== 'number') {
+      if (!origin || !destination || 
+          typeof origin.lat !== 'number' || typeof origin.lng !== 'number' ||
+          typeof destination.lat !== 'number' || typeof destination.lng !== 'number') {
         throw new BadRequestError('Invalid coordinate format. Required: {lat, lng}');
       }
+      
       const R = 6371; // Earth's radius in km
       const dLat = this.toRad(destination.lat - origin.lat);
       const dLon = this.toRad(destination.lng - origin.lng);
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(this.toRad(origin.lat)) * Math.cos(this.toRad(destination.lat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(this.toRad(origin.lat)) * Math.cos(this.toRad(destination.lat)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distance = R * c;
-      const roadDistance = distance * 1.4; // 40% multiplier
+      const roadDistance = distance * 1.4; // 40% multiplier for road distance
+      
       return Math.round(roadDistance * 10) / 10;
+      
     } catch (error) {
-      logger.error('Error calculating distance', { error: error.message, origin, destination });
+      logger.error('Error calculating distance', {
+        error: error.message,
+        origin,
+        destination
+      });
       throw new BadRequestError(`Failed to calculate distance: ${error.message}`);
     }
   }
 
-  toRad(degrees) { return degrees * (Math.PI / 180); }
+  toRad(degrees) {
+    return degrees * (Math.PI / 180);
+  }
 }
 
 export default new PricingService();
-
