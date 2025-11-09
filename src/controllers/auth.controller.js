@@ -83,7 +83,7 @@ export const sendOtp = catchAsync(async (req, res) => {
         });
       });
   }
-  
+
   // TODO: Implement SMS sending logic here
   // e.g., await sendSms(normalizedPhone, `Your OTP is ${otpCode}`);
 
@@ -110,8 +110,7 @@ export const sendOtp = catchAsync(async (req, res) => {
  * @access  Public
  */
 export const verifyOtp = catchAsync(async (req, res) => {
-  const { phoneNumber, otp } = req.body;
-  
+  const { phoneNumber, otp, fcmToken} = req.body;
   if (!phoneNumber || !otp) {
     throw new BadRequestError('Phone number and OTP are required');
   }
@@ -195,12 +194,19 @@ export const verifyOtp = catchAsync(async (req, res) => {
     // Update user record for login
     user.isVerified = true; // Ensure verified status
     user.lastLogin = new Date();
-    
+
     // Generate JWT token
     const token = user.getJWTToken();
     user.token = token; // Save token to user document
 
     await user.save(); // Save lastLogin, token, etc.
+
+    // --- [NEW] Add device info (non-blocking) ---
+    if (fcmToken && deviceId) {
+      user.addDevice({ deviceId, fcmToken, deviceType: deviceType || 'unknown' })
+        .catch(err => logger.error('Failed to add device on login', { userId: user._id, error: err.message }));
+    }
+    // --- [END NEW] ---
 
     // Set cookie if enabled
     if (process.env.USE_COOKIES === 'true') {
@@ -260,7 +266,7 @@ export const verifyOtp = catchAsync(async (req, res) => {
  * @access  Public
  */
 export const register = catchAsync(async (req, res) => {
-  const { name, phoneNumber, email, address, preferences } = req.body;
+  const { name, phoneNumber, email, address, preferences, fcmToken} = req.body;
 
   // 1. Validate required fields
   if (!name || !phoneNumber) {
@@ -279,7 +285,7 @@ export const register = catchAsync(async (req, res) => {
   const existingUser = await User.findOne({ phoneNumber: normalizedPhone });
   if (existingUser) {
     logger.warn('Registration failed - phone number already exists', {
-       phoneNumber: maskPhoneNumber(normalizedPhone)
+      phoneNumber: maskPhoneNumber(normalizedPhone)
     });
     throw new ConflictError('This phone number is already registered. Please log in.');
   }
@@ -288,11 +294,11 @@ export const register = catchAsync(async (req, res) => {
   if (email) {
     const existingEmail = await User.findOne({ email });
     if (existingEmail) {
-       logger.warn('Registration failed - email already exists', { email });
+      logger.warn('Registration failed - email already exists', { email });
       throw new BadRequestError('This email is already registered by another account.');
     }
   }
-  
+
   // 4. Create new user
   // isVerified is true because they *must* have passed verifyOtp to get here
   // (We trust the client to call this endpoint only after verifyOtp returns newUser: true)
@@ -329,6 +335,13 @@ export const register = catchAsync(async (req, res) => {
     userId: user._id,
     phoneNumber: maskPhoneNumber(user.phoneNumber)
   });
+
+  // --- [NEW] Add device info (non-blocking) ---
+  if (fcmToken && deviceId) {
+    user.addDevice({ deviceId, fcmToken, deviceType: deviceType || 'unknown' })
+      .catch(err => logger.error('Failed to add device on register', { userId: user._id, error: err.message }));
+  }
+  // --- [END NEW] ---
 
   // 7. Set cookie if enabled
   if (process.env.USE_COOKIES === 'true') {
@@ -410,7 +423,7 @@ export const updateProfile = catchAsync(async (req, res) => {
   logger.info('Profile update attempt', { userId });
 
   // User is already attached by 'protect' middleware
-  const user = req.user; 
+  const user = req.user;
 
   // Check if email is being changed and if it's already taken
   if (email && email !== user.email) {
@@ -423,7 +436,7 @@ export const updateProfile = catchAsync(async (req, res) => {
       logger.warn('Profile update failed - email already in use', { userId, email });
       throw new ConflictError('This email is already registered by another account.');
     }
-     user.email = email; // Update email
+    user.email = email; // Update email
   }
 
   // Update other fields if provided
@@ -528,7 +541,7 @@ export const deleteAccount = catchAsync(async (req, res) => {
   // Consider anonymizing data here or in a background job
   // user.email = `deleted-${userId}@example.com`;
   // user.name = "Deleted User";
-  
+
   await user.save();
 
   logger.warn('User account soft-deleted', {
@@ -538,7 +551,7 @@ export const deleteAccount = catchAsync(async (req, res) => {
 
   // Clear authentication cookie
   if (process.env.USE_COOKIES === 'true') {
-      clearTokenCookie(res);
+    clearTokenCookie(res);
   }
 
   return sendSuccess(res, null, 'Account deleted successfully', 200);
@@ -555,7 +568,7 @@ export const checkPhoneExists = catchAsync(async (req, res) => {
   if (!phoneNumber) {
     throw new BadRequestError('Phone number is required');
   }
-  
+
   const normalizedPhone = phoneNumber.replace(/\D/g, '');
   logger.info('Phone number existence check', {
     phoneNumber: maskPhoneNumber(normalizedPhone)

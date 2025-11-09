@@ -9,7 +9,7 @@ import {
   PAYMENT_METHODS,
 } from '../config/constants.js';
 import logger from '../config/logger.js';
-import { sendBookingNotification } from '../utils/notification.utils.js';
+import { sendBookingNotification, sendAdminNotification } from '../utils/notification.utils.js'; // --- [MODIFIED] ---
 import User from '../models/User.js';
 
 /**
@@ -86,6 +86,14 @@ export const handleRazorpayWebhook = catchAsync(async (req, res) => {
       });
 
       // 7. Send Notification
+      // --- [NEW] Notify Admins (non-blocking) ---
+      sendAdminNotification(
+        'New Online Booking (Webhook)',
+        `Booking ${booking.bookingId} (${booking.bookingType}) for ₹${booking.fareDetails.finalAmount} has been confirmed via webhook (Paid).`,
+        { bookingId: booking.bookingId }
+      ).catch(err => logger.error('Failed to send admin notification from webhook', { err: err.message }));
+      // --- [END NEW] ---
+
       const user = await User.findById(booking.userId).select('deviceInfo');
       if (user?.deviceInfo?.length > 0) {
         const fcmToken = user.deviceInfo[0].fcmToken;
@@ -133,4 +141,3 @@ export const handleRazorpayWebhook = catchAsync(async (req, res) => {
   // Acknowledge the webhook
   res.status(200).json({ status: 'ok' });
 });
-
