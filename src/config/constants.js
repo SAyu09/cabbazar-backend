@@ -214,6 +214,46 @@ export const VEHICLE_TYPES = {
 export const TAX_CONFIG = {
   GST_RATE: 0.05 // 5% GST
 };
+
+// --- [NEW] ---
+// Outstation Surcharges (Estimates)
+// These are estimates for tolls, state permits, etc.
+// In a real app, this should come from a route API (like Google)
+export const OUTSTATION_SURCHARGES = {
+  TOLL_PER_KM: 1.5, // Estimated ₹1.5 per km for tolls
+  STATE_PERMIT_HATCHBACK: 300,
+  STATE_PERMIT_SEDAN: 400,
+  STATE_PERMIT_SUV: 500,
+  STATE_PERMIT_PREMIUM_SEDAN: 600,
+  DEFAULT_STATE_PERMIT_FEE: 450 // Fallback
+};
+// --- [END NEW] ---
+
+// --- [NEW] ADD-ON SERVICES ---
+export const ADD_ON_SERVICES = {
+  LUGGAGE: {
+    name: 'Assured luggage space',
+    price: 105,
+  },
+  PET: {
+    name: 'Pet Allowed',
+    price: 840,
+  },
+  REFUNDABLE: {
+    name: 'Upgrade to Refundable booking',
+    price: 58,
+  },
+  NEW_CAR: {
+    name: 'Confirmed Car Model 2022 or above',
+    price: 420,
+  },
+  DRIVER_LANG: {
+    name: 'Preferred Driver language',
+    price: 315,
+  }
+};
+// --- [END NEW] ---
+
 // Vehicle Capacity Configuration
 export const VEHICLE_CAPACITY = {
   HATCHBACK: { passengers: 4, luggage: 2 },
@@ -229,14 +269,16 @@ export const VEHICLE_FEATURES = {
   PREMIUM_SEDAN: ['AC', 'Premium Music System', 'Leather Seats', 'Premium Interior']
 };
 // Distance Configuration
+// Distance Configuration
 export const DISTANCE_CONFIG = {
-  MIN_DISTANCE: 50, // Minimum distance for outstation (km)
-  MAX_DISTANCE: 2000, // Maximum distance per booking (km)
-  FREE_KM_FOR_AIRPORT: 10, // Free km included in airport transfers
+  MIN_DISTANCE: 50,
+  MAX_DISTANCE: 2000,
+  MIN_OUTSTATION_KM_PER_DAY: 50,
+  FREE_KM_FOR_AIRPORT: 10,
   AVERAGE_SPEED_HIGHWAY: 60, // km/h
   AVERAGE_SPEED_CITY: 30 // km/h
 };
-// Booking Configuration
+
 export const BOOKING_CONFIG = {
   CANCELLATION_WINDOW_HOURS: 24,
   CANCELLATION_CHARGE_PERCENT: 0.20,
@@ -263,7 +305,8 @@ export const NOTIFICATION_TYPES = {
   TRIP_COMPLETED: 'TRIP_COMPLETED',
   PAYMENT_RECEIVED: 'PAYMENT_RECEIVED',
   OTP_SENT: 'OTP_SENT',
-  RATING_RECEIVED: 'RATING_RECEIVED'
+  RATING_RECEIVED: 'RATING_RECEIVED',
+  ADMIN_ALERT: 'ADMIN_ALERT' // --- [NEW] ---
 };
 // Socket Events
 export const SOCKET_EVENTS = {
@@ -330,6 +373,8 @@ export default {
   BOOKING_TYPES,
   VEHICLE_TYPES,
   TAX_CONFIG,
+  OUTSTATION_SURCHARGES, // --- [NEW] ---
+  ADD_ON_SERVICES, // --- [NEW] ---
   VEHICLE_CAPACITY,
   VEHICLE_FEATURES,
   DISTANCE_CONFIG,

@@ -83,11 +83,13 @@ const fareSchema = new mongoose.Schema({
   extraKmRate: { type: Number },
   extraHourRate: { type: Number },
   tollCharges: { type: Number, default: 0, min: 0 },
+  stateTax: { type: Number, default: 0, min: 0 }, // --- [NEW] ---
   parkingCharges: { type: Number, default: 0, min: 0 },
   driverAllowance: { type: Number, default: 0, min: 0 },
   discountCode: { type: String, trim: true, uppercase: true },
   discountAmount: { type: Number, default: 0, min: 0 },
   discountType: { type: String, enum: ['PERCENTAGE', 'FIXED', null] },
+  addOnsTotal: { type: Number, default: 0, min: 0 }, // --- [NEW] ---
 }, { _id: false });
 
 const cancellationSchema = new mongoose.Schema({
@@ -233,7 +235,7 @@ const bookingSchema = new mongoose.Schema({
     type: fareSchema,
     required: [true, 'Fare details are required'],
   },
-  
+
   // --- PAYMENT FIELDS MODIFIED ---
   paymentId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -251,6 +253,18 @@ const bookingSchema = new mongoose.Schema({
   metadata: { type: metadataSchema },
   specialRequests: { type: [String], default: [] },
   notes: { type: String, trim: true, maxlength: 500 },
+
+  // --- [NEW] ---
+  addOnServices: {
+    type: [{
+      code: String,
+      name: String,
+      price: Number
+    }],
+    default: []
+  },
+  // --- [END NEW] ---
+
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -304,4 +318,3 @@ bookingSchema.virtual('tripDurationMinutes').get(function () {
 // ------------------ Model Export ------------------
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;
-

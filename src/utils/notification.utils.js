@@ -1,6 +1,7 @@
 // src/utils/notification.utils.js - Universal Notification Service
 import { messaging, isFirebaseAvailable } from '../config/firebase.js';
 import logger from '../config/logger.js';
+import User from '../models/User.js'; // --- [NEW] ---
 
 /**
  * Notification types enum
@@ -12,7 +13,8 @@ export const NOTIFICATION_TYPES = {
   PROMOTION: 'promotional',
   ALERT: 'alert',
   REMINDER: 'reminder',
-  GENERAL: 'general'
+  GENERAL: 'general',
+  ADMIN_ALERT: 'ADMIN_ALERT' // --- [NEW] ---
 };
 
 /**
@@ -453,6 +455,68 @@ export const sendDriverNotification = async (token, title, message, extraData = 
 };
 
 /**
+ * --- [NEW] ---
+ * Send a notification to all admin users
+ * @param {string} title - Notification title
+ * @param {string} body - Notification body
+ * @param {Object} data - Additional data
+ * @returns {Promise<void>}
+ */
+export const sendAdminNotification = async (title, body, data = {}) => {
+  try {
+    const admins = await User.find({
+      role: 'ADMIN',
+      isActive: true,
+      'preferences.notifications.push': true
+    }).select('deviceInfo').lean();
+
+    if (!admins || admins.length === 0) {
+      logger.warn('No admin users found to send notification to.');
+      return;
+    }
+
+    const tokens = new Set();
+    admins.forEach(admin => {
+      admin.deviceInfo?.forEach(device => {
+        if (device.fcmToken) {
+          tokens.add(device.fcmToken);
+        }
+      });
+    });
+
+    if (tokens.size === 0) {
+      logger.warn('Admin users found, but none have FCM tokens.');
+      return;
+    }
+
+    const notifications = Array.from(tokens).map(token => ({
+      token,
+      title: `Admin Alert: ${title}`,
+      body,
+      type: NOTIFICATION_TYPES.ADMIN_ALERT,
+      priority: NOTIFICATION_PRIORITY.HIGH,
+      data: {
+        ...data,
+        isAdminAlert: true
+      }
+    }));
+
+    const results = await sendBulkNotifications(notifications);
+    logger.info('Admin notifications sent', {
+      success: results.successCount,
+      failed: results.failureCount
+    });
+
+  } catch (error) {
+    logger.error('Failed to send admin notifications', {
+      error: error.message,
+      stack: error.stack
+    });
+  }
+};
+// --- [END NEW] ---
+
+/**
  * Send trip notification
  * @param {string} token - FCM token
  * @param {string} bookingId - Booking ID
@@ -486,6 +550,7 @@ export default {
   sendDriverNotification,
   sendTripNotification,
   sendBulkNotifications,
+  sendAdminNotification, // --- [NEW] ---
   isNotificationServiceAvailable,
   validateFCMToken,
   NOTIFICATION_TYPES,

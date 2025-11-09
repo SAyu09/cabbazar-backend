@@ -1,9 +1,9 @@
-// src/routes/booking.routes.js - Complete Booking Routes
+// src/routes/booking.routes.js - UPDATED with Multi-Day Round Trip Validation
 import express from 'express';
 import { body, query } from 'express-validator';
 import * as bookingController from '../controllers/booking.controller.js';
-import { protect } from '../middleware/auth.middleware.js';
-import validate, { validateObjectId } from '../middleware/validation.middleware.js';
+import { protect, restrictTo } from '../middleware/auth.middleware.js';
+import validate, { validateObjectId, validatePagination } from '../middleware/validation.middleware.js';
 import { BOOKING_TYPES, BOOKING_STATUS } from '../config/constants.js';
 
 const router = express.Router();
@@ -21,9 +21,20 @@ const searchValidation = [
     .trim()
     .notEmpty().withMessage('Drop location is required')
     .isLength({ min: 2 }).withMessage('Drop location must be at least 2 characters'),
-  body('date')
+  body('date') // This acts as startDateTime
     .notEmpty().withMessage('Travel date is required')
     .isISO8601().withMessage('Invalid date format. Use ISO 8601 format'),
+  // --- [MODIFIED] ---
+  body('endDateTime')
+    .optional()
+    .isISO8601().withMessage('Invalid return date format (endDateTime)')
+    .custom((value, { req }) => {
+      if (value && new Date(value) < new Date(req.body.date)) {
+        throw new Error('Return date (endDateTime) must be after start date (date)');
+      }
+      return true;
+    }),
+  // --- [END MODIFIED] ---
   body('type')
     .trim()
     .notEmpty().withMessage('Booking type is required')
@@ -61,7 +72,13 @@ const createBookingValidation = [
     .isISO8601().withMessage('Invalid date format'),
   body('endDateTime')
     .optional()
-    .isISO8601().withMessage('Invalid date format'),
+    .isISO8601().withMessage('Invalid date format')
+    .custom((value, { req }) => {
+      if (value && new Date(value) < new Date(req.body.startDateTime)) {
+        throw new Error('End date/time must be after start date/time');
+      }
+      return true;
+    }),
   body('vehicleType')
     .trim()
     .notEmpty().withMessage('Vehicle type is required'),
@@ -97,6 +114,9 @@ const createBookingValidation = [
     .optional()
     .trim()
     .isLength({ max: 500 }).withMessage('Notes cannot exceed 500 characters'),
+  body('addOnCodes')
+    .optional()
+    .isArray().withMessage('Add-ons must be an array of codes'),
   validate
 ];
 
@@ -141,6 +161,11 @@ const estimateFareValidation = [
   body('startDateTime')
     .optional()
     .isISO8601().withMessage('Invalid date format'),
+  // --- [NEW] ---
+  body('endDateTime')
+    .optional()
+    .isISO8601().withMessage('Invalid return date format (endDateTime)'),
+  // --- [END NEW] ---
   validate
 ];
 
@@ -162,7 +187,6 @@ const cancelReasonValidation = [
  * @access  Public
  */
 router.post('/search', bookingController.searchCabs);
-
 /**
  * @route   POST /api/bookings/estimate-fare
  * @desc    Estimate fare for a trip
@@ -277,5 +301,22 @@ router.post(
   bookingController.applyDiscount
 );
 
-export default router;
+// ============================================
+// ADMIN ROUTES
+// ============================================
 
+/**
+ * @route   GET /api/bookings/admin/confirmed
+ * @desc    Get all confirmed bookings (Admin only)
+ * @access  Admin
+ */
+router.get(
+  '/admin/confirmed',
+  protect,
+  restrictTo('ADMIN'),
+  validatePagination,
+  bookingController.getConfirmedBookings
+);
+
+
+export default router;

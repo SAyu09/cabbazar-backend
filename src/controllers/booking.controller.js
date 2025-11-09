@@ -1,4 +1,4 @@
-// src/controllers/booking.controller.js - COMPLETE FIXED VERSION
+// src/controllers/booking.controller.js - UPDATED to handle includeTolls flag
 import { Booking, User, Vehicle } from '../models/index.js';
 import Driver from '../models/Driver.js';
 import Payment from '../models/Payment.js';
@@ -22,7 +22,8 @@ import {
   PAYMENT_METHODS,
   VEHICLE_TYPES,
   TAX_CONFIG,
-  DISTANCE_CONFIG
+  DISTANCE_CONFIG,
+  ADD_ON_SERVICES
 } from '../config/constants.js';
 import {
   parsePagination,
@@ -34,7 +35,8 @@ import {
 import logger from '../config/logger.js';
 import {
   sendBookingNotification,
-  sendDriverNotification
+  sendDriverNotification,
+  sendAdminNotification
 } from '../utils/notification.utils.js';
 
 // ========================================
@@ -69,18 +71,190 @@ const AIRPORT_FIXED_DISTANCES = {
   'chhatrapati shivaji (bom)_mumbai': 15,
 };
 
-// ⭐ FIXED: Define local rental types constant
-const localRentalTypes = [
+const LOCAL_RENTAL_TYPES = [
   BOOKING_TYPES.LOCAL_2_20,
   BOOKING_TYPES.LOCAL_4_40,
   BOOKING_TYPES.LOCAL_8_80,
   BOOKING_TYPES.LOCAL_12_120
 ];
 
-const LOCAL_RENTAL_MAX_DISTANCE = 80; // km
-const AIRPORT_MAX_DISTANCE = 200; // km
-const OUTSTATION_MIN_DISTANCE = 50; // km
-const SHORT_DISTANCE_THRESHOLD = 50; // km
+const LOCAL_RENTAL_MAX_DISTANCE = 80;
+const AIRPORT_MAX_DISTANCE = 200;
+const OUTSTATION_MIN_DISTANCE = 50;
+const SHORT_DISTANCE_THRESHOLD = 50;
+
+// ========================================
+// VALIDATION UTILITIES
+// ========================================
+
+/**
+ * Validate location object structure
+ */
+const validateLocation = (location, fieldName = 'location') => {
+  if (!location) {
+    throw new BadRequestError(`${fieldName} is required`);
+  }
+
+  if (typeof location !== 'object') {
+    throw new BadRequestError(`${fieldName} must be an object`);
+  }
+
+  if (!location.city || typeof location.city !== 'string' || location.city.trim().length === 0) {
+    throw new BadRequestError(`${fieldName}.city is required and must be a non-empty string`);
+  }
+
+  if (location.lat !== undefined && (typeof location.lat !== 'number' || location.lat < -90 || location.lat > 90)) {
+    throw new BadRequestError(`${fieldName}.lat must be a number between -90 and 90`);
+  }
+
+  if (location.lng !== undefined && (typeof location.lng !== 'number' || location.lng < -180 || location.lng > 180)) {
+    throw new BadRequestError(`${fieldName}.lng must be a number between -180 and 180`);
+  }
+
+  return true;
+};
+
+/**
+ * Validate date/time parameters
+ */
+const validateDateTime = (dateTime, minHoursAhead = BOOKING_CONFIG.MIN_BOOKING_HOURS_AHEAD) => {
+  if (!dateTime) {
+    throw new BadRequestError('Date/time is required');
+  }
+
+  const date = new Date(dateTime);
+
+  if (isNaN(date.getTime())) {
+    throw new BadRequestError('Invalid date/time format');
+  }
+
+  const now = new Date();
+  const minBookingTime = addHours(now, minHoursAhead);
+  const maxBookingTime = addDays(now, BOOKING_CONFIG.ADVANCE_BOOKING_DAYS);
+
+  if (date < minBookingTime) {
+    throw new BadRequestError(
+      `Booking must be at least ${minHoursAhead} hours in advance. Earliest allowed: ${minBookingTime.toISOString()}`
+    );
+  }
+
+  if (date > maxBookingTime) {
+    throw new BadRequestError(
+      `Cannot book more than ${BOOKING_CONFIG.ADVANCE_BOOKING_DAYS} days in advance. Latest allowed: ${maxBookingTime.toISOString()}`
+    );
+  }
+
+  return date;
+};
+
+/**
+ * Validate passenger details
+ */
+const validatePassengerDetails = (details, user) => {
+  if (!details || typeof details !== 'object' || !details.name || !details.phone) {
+    // Use user details as fallback if details are not fully provided
+    if (!user.name || !user.phoneNumber) {
+      throw new BadRequestError('Passenger details (name and phone) are required, or must be set in user profile.');
+    }
+
+    return {
+      name: user.name,
+      phone: user.phoneNumber,
+      email: user.email || null
+    };
+  }
+
+  const name = details.name?.trim();
+  const phone = details.phone?.replace(/\D/g, '');
+  const email = details.email?.trim().toLowerCase();
+
+  if (!name || name.length < 2 || name.length > 100) {
+    throw new BadRequestError('Passenger name must be between 2 and 100 characters');
+  }
+
+  if (!phone || !/^[6-9]\d{9}$/.test(phone)) {
+    throw new BadRequestError('Valid 10-digit Indian phone number is required');
+  }
+
+  if (email && !/\S+@\S+\.\S+/.test(email)) {
+    throw new BadRequestError('Invalid email address format');
+  }
+
+  return {
+    name,
+    phone,
+    email: email || null
+  };
+};
+
+/**
+ * Validate add-on services
+ */
+const validateAddOnServices = (addOnCodes) => {
+  if (!Array.isArray(addOnCodes)) {
+    return { total: 0, services: [] };
+  }
+
+  const uniqueCodes = [...new Set(addOnCodes)];
+  const validServices = [];
+  let total = 0;
+
+  for (const code of uniqueCodes) {
+    const service = ADD_ON_SERVICES[code];
+
+    if (!service) {
+      logger.warn('Invalid add-on service code', { code });
+      continue;
+    }
+
+    validServices.push({
+      code,
+      name: service.name,
+      price: service.price
+    });
+
+    total += service.price;
+  }
+
+  return {
+    total: Math.round(total),
+    services: validServices
+  };
+};
+
+/**
+ * Validate vehicle type
+ */
+const validateVehicleType = (vehicleType) => {
+  if (!vehicleType) {
+    throw new BadRequestError('Vehicle type is required');
+  }
+
+  if (!Object.values(VEHICLE_TYPES).includes(vehicleType)) {
+    throw new BadRequestError(
+      `Invalid vehicle type: ${vehicleType}. Must be one of: ${Object.values(VEHICLE_TYPES).join(', ')}`
+    );
+  }
+
+  return vehicleType;
+};
+
+/**
+ * Validate booking type
+ */
+const validateBookingType = (bookingType) => {
+  if (!bookingType) {
+    throw new BadRequestError('Booking type is required');
+  }
+
+  if (!Object.values(BOOKING_TYPES).includes(bookingType)) {
+    throw new BadRequestError(
+      `Invalid booking type: ${bookingType}. Must be one of: ${Object.values(BOOKING_TYPES).join(', ')}`
+    );
+  }
+
+  return bookingType;
+};
 
 // ========================================
 // SMART HELPER FUNCTIONS
@@ -89,35 +263,35 @@ const SHORT_DISTANCE_THRESHOLD = 50; // km
 /**
  * Check if location contains airport keywords
  */
-function isAirportLocation(location) {
+const isAirportLocation = (location) => {
   if (!location) return false;
   const text = location.toLowerCase().trim();
   return AIRPORT_KEYWORDS.some(keyword => text.includes(keyword));
-}
+};
 
 /**
  * Get airport for a city
  */
-function getAirportForCity(city) {
+const getAirportForCity = (city) => {
   if (!city) return null;
   const normalizedCity = city.toLowerCase().trim();
   return CITY_AIRPORTS[normalizedCity] || null;
-}
+};
 
 /**
  * Get fixed airport distance from lookup table
  */
-function getAirportFixedDistance(pickup, drop) {
+const getAirportFixedDistance = (pickup, drop) => {
   if (!pickup || !drop) return null;
   const key = `${pickup.toLowerCase().trim()}_${drop.toLowerCase().trim()}`;
   const revKey = `${drop.toLowerCase().trim()}_${pickup.toLowerCase().trim()}`;
   return AIRPORT_FIXED_DISTANCES[key] ?? AIRPORT_FIXED_DISTANCES[revKey] ?? null;
-}
+};
 
 /**
  * Auto-detect booking type based on locations and distance
  */
-function autoDetectBookingType(from, to, distance) {
+const autoDetectBookingType = (from, to, distance) => {
   const pickupIsAirport = isAirportLocation(from);
   const dropIsAirport = isAirportLocation(to);
 
@@ -140,12 +314,12 @@ function autoDetectBookingType(from, to, distance) {
   }
 
   return BOOKING_TYPES.ONE_WAY;
-}
+};
 
 /**
  * Get all applicable booking types for a route
  */
-function getApplicableBookingTypes(from, to, distance) {
+const getApplicableBookingTypes = (from, to, distance) => {
   const types = [];
   const pickupIsAirport = isAirportLocation(from);
   const dropIsAirport = isAirportLocation(to);
@@ -169,22 +343,122 @@ function getApplicableBookingTypes(from, to, distance) {
   types.push(BOOKING_TYPES.ROUND_TRIP);
 
   return types;
-}
+};
 
 /**
- * Build location object
+ * Build clean location object
  */
-function buildLocationObject(locationData) {
-  if (!locationData || !locationData.city) {
-    throw new BadRequestError('Location must have at least a city');
-  }
+const buildLocationObject = (locationData) => {
+  validateLocation(locationData);
+
   return {
     city: locationData.city.trim(),
-    address: locationData.address ? locationData.address.trim() : undefined,
+    address: locationData.address?.trim() || undefined,
     lat: locationData.lat || undefined,
     lng: locationData.lng || undefined,
   };
-}
+};
+
+/**
+ * Calculate distance between two locations
+ */
+const calculateDistance = async (from, to) => {
+  if (!geoService.isAvailable()) {
+    throw new ServiceUnavailableError('Location service is temporarily unavailable');
+  }
+
+  // Try fixed airport distance first
+  const fixedDistance = getAirportFixedDistance(from, to);
+  if (fixedDistance) {
+    logger.info('Using fixed airport distance', { from, to, distance: fixedDistance });
+    return {
+      distance: fixedDistance,
+      duration: null,
+      source: 'airport_fixed_table'
+    };
+  }
+
+  try {
+    // Geocode locations
+    const originCoords = await geoService.geocode(from);
+    const destinationCoords = await geoService.geocode(to);
+
+    // Calculate distance using Google Distance Matrix
+    const matrix = await geoService.getDistanceMatrix(originCoords, destinationCoords);
+
+    return {
+      distance: matrix.distance,
+      duration: matrix.duration,
+      source: 'google_distance_matrix',
+      originCoords,
+      destinationCoords
+    };
+  } catch (error) {
+    logger.error('Distance calculation failed', { error: error.message, from, to });
+    throw new ServiceUnavailableError(
+      'Unable to calculate distance. Please check your locations and try again.'
+    );
+  }
+};
+
+/**
+ * Send notifications to user
+ */
+const notifyUser = async (user, bookingId, type, message) => {
+  if (!user?.deviceInfo?.length) return;
+
+  const latestDevice = user.deviceInfo
+    .sort((a, b) => new Date(b.lastUsed) - new Date(a.lastUsed))[0];
+
+  const fcmToken = latestDevice?.fcmToken;
+
+  if (!fcmToken) return;
+
+  try {
+    await sendBookingNotification(fcmToken, bookingId, type, message);
+    logger.info('User notification sent', { bookingId, type });
+  } catch (error) {
+    logger.error('Failed to send user notification', {
+      bookingId,
+      type,
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Send notifications to driver
+ */
+const notifyDriver = async (driver, title, message) => {
+  const fcmToken = driver?.deviceInfo?.[0]?.fcmToken;
+
+  if (!fcmToken) return;
+
+  try {
+    await sendDriverNotification(fcmToken, title, message);
+    logger.info('Driver notification sent', { driverId: driver._id });
+  } catch (error) {
+    logger.error('Failed to send driver notification', {
+      driverId: driver._id,
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Send notifications to admin
+ */
+const notifyAdmin = async (title, message, metadata = {}) => {
+  try {
+    await sendAdminNotification(title, message, metadata);
+    logger.info('Admin notification sent', { title });
+  } catch (error) {
+    logger.error('Failed to send admin notification', {
+      title,
+      error: error.message
+    });
+  }
+};
 
 // ========================================
 // MAIN SEARCH CONTROLLER
@@ -199,173 +473,115 @@ export const searchCabs = catchAsync(async (req, res) => {
   const {
     from,
     to,
-    date,
+    date, // This is the start date
     type,
     startDateTime,
+    endDateTime, // This is the return date
+    includeTolls
   } = req.body;
+  // --- [END MODIFIED] ---
 
-  // ========================================
-  // 1. BASIC VALIDATION
-  // ========================================
-  if (!from || !to) {
-    throw new BadRequestError('Pickup (from) and drop-off (to) locations are required');
+  // Validation
+  if (!from || typeof from !== 'string' || from.trim().length === 0) {
+    throw new BadRequestError('Pickup location (from) is required');
   }
 
-  const tripDate = new Date(date || startDateTime || Date.now());
-  if (isNaN(tripDate.getTime())) {
-    throw new BadRequestError('Invalid date format');
+  if (!to || typeof to !== 'string' || to.trim().length === 0) {
+    throw new BadRequestError('Drop-off location (to) is required');
   }
 
-  // Date range validation
-  const minBookingTime = addHours(new Date(), BOOKING_CONFIG.MIN_BOOKING_HOURS_AHEAD);
-  const maxBookingTime = addDays(new Date(), BOOKING_CONFIG.ADVANCE_BOOKING_DAYS);
+  // --- [MODIFIED] ---
+  // Use 'date' or 'startDateTime' for tripDate
+  const tripDate = validateDateTime(date || startDateTime || Date.now());
+  const tripEndDate = endDateTime ? new Date(endDateTime) : null;
 
-  if (tripDate < minBookingTime) {
-    throw new BadRequestError(
-      `Booking must be at least ${BOOKING_CONFIG.MIN_BOOKING_HOURS_AHEAD} hours in advance`
-    );
+  if (tripEndDate && isNaN(tripEndDate.getTime())) {
+    throw new BadRequestError('Invalid return date (endDateTime) format');
   }
-  if (tripDate > maxBookingTime) {
-    throw new BadRequestError(
-      `Cannot book more than ${BOOKING_CONFIG.ADVANCE_BOOKING_DAYS} days in advance`
-    );
+  if (tripEndDate && tripEndDate < tripDate) {
+    throw new BadRequestError('Return date (endDateTime) must be after start date');
   }
+  // --- [END MODIFIED] ---
 
-  // ========================================
-  // 2. GEOCODING & DISTANCE CALCULATION
-  // ========================================
-  let originCoords, destinationCoords, estimatedDistance, duration;
-  let distanceSource = 'not_calculated';
+  // Calculate distance
+  const distanceResult = await calculateDistance(from, to);
+  const { distance, duration, source, originCoords, destinationCoords } = distanceResult;
 
-  if (!geoService.isAvailable()) {
-    throw new ServiceUnavailableError(
-      'Location service is temporarily unavailable. Please try again later.'
-    );
+  // Auto-detect or validate booking type
+  const isLocalRequest = type && LOCAL_RENTAL_TYPES.includes(type);
+
+  if (!isLocalRequest && (!distance || distance <= 0)) {
+    throw new BadRequestError('Could not determine a valid distance for this route');
   }
 
-  try {
-    logger.info('Geocoding pickup location', { from });
-    originCoords = await geoService.geocode(from);
-
-    logger.info('Geocoding drop location', { to });
-    destinationCoords = await geoService.geocode(to);
-
-    // Try fixed airport distance first
-    const fixedDistance = getAirportFixedDistance(from, to);
-    if (fixedDistance) {
-      estimatedDistance = fixedDistance;
-      distanceSource = 'airport_fixed_table';
-      logger.info('Using fixed airport distance', { from, to, distance: fixedDistance });
-    } else {
-      // Calculate distance using Google Distance Matrix
-      const matrix = await geoService.getDistanceMatrix(originCoords, destinationCoords);
-      estimatedDistance = matrix.distance;
-      duration = matrix.duration;
-      distanceSource = 'google_distance_matrix';
-      logger.info('Distance calculated via Google', {
-        from,
-        to,
-        distance: estimatedDistance,
-        duration
-      });
-    }
-
-  } catch (error) {
-    logger.error('Geocoding/Distance calculation failed', {
-      error: error.message,
-      from,
-      to
-    });
-
-    // Fallback to straight-line distance
-    if (originCoords && destinationCoords) {
-      estimatedDistance = pricingService.calculateDistanceFromCoordinates(
-        originCoords,
-        destinationCoords
-      );
-      distanceSource = 'fallback_straight_line';
-      logger.warn('Using fallback distance calculation', {
-        distance: estimatedDistance
-      });
-    } else {
-      throw new ServiceUnavailableError(
-        'Unable to calculate distance. Please check your locations and try again.'
-      );
-    }
-  }
-
-  // ⭐ FIXED: Validate distance only for non-local bookings
-  const isLocalRequest = type && localRentalTypes.includes(type);
-
-  if (!isLocalRequest && (!estimatedDistance || estimatedDistance <= 0)) {
-    throw new BadRequestError('Could not determine a valid distance for this route.');
-  }
-
-  // ========================================
-  // 3. AUTO-DETECT OR VALIDATE BOOKING TYPE
-  // ========================================
-  let detectedType = autoDetectBookingType(from, to, estimatedDistance || 0);
+  const detectedType = autoDetectBookingType(from, to, distance || 0);
   let bookingType = type || detectedType;
-  let typeAutoDetected = !type;
+  const typeAutoDetected = !type;
   let typeChangedWarning = null;
 
-  // Get all applicable types for this route
-  const applicableTypes = getApplicableBookingTypes(from, to, estimatedDistance || 0);
+  // Get applicable types
+  const applicableTypes = getApplicableBookingTypes(from, to, distance || 0);
 
   // Validate user-provided type
-  if (type && !Object.values(BOOKING_TYPES).includes(type)) {
-    throw new BadRequestError(`Invalid booking type: ${type}`);
+  if (type) {
+    validateBookingType(type);
+
+    if (!applicableTypes.includes(type)) {
+      logger.warn('User selected type not applicable, auto-correcting', {
+        selectedType: type,
+        detectedType,
+        distance
+      });
+
+      bookingType = detectedType;
+      typeChangedWarning = {
+        message: `${type} is not available for this route (distance: ${(distance || 0).toFixed(1)} km). Showing ${detectedType} options instead.`,
+        originalType: type,
+        correctedType: detectedType,
+        reason: 'TYPE_NOT_APPLICABLE_FOR_DISTANCE',
+        availableTypes: applicableTypes
+      };
+    }
   }
 
-  // Check if user's selected type is applicable
-  if (type && !applicableTypes.includes(type)) {
-    logger.warn('User selected type not applicable, auto-correcting', {
-      selectedType: type,
-      detectedType,
-      distance: estimatedDistance
-    });
+  // --- [NEW] ---
+  // Ensure endDateTime is null if not a round trip
+  const finalEndDateTime = (bookingType === BOOKING_TYPES.ROUND_TRIP) ? tripEndDate : null;
+  // --- [END NEW] ---
 
-    bookingType = detectedType;
-    typeChangedWarning = {
-      message: `${type} is not available for this route (distance: ${(estimatedDistance || 0).toFixed(1)} km). Showing ${detectedType} options instead.`,
-      originalType: type,
-      correctedType: detectedType,
-      reason: 'TYPE_NOT_APPLICABLE_FOR_DISTANCE',
-      availableTypes: applicableTypes
-    };
-  }
+  // Get vehicle options & pricing
+  const isLocalBooking = LOCAL_RENTAL_TYPES.includes(bookingType);
 
-  // ========================================
-  // 4. GET VEHICLE OPTIONS & PRICING
-  // ========================================
-  const isLocalBooking = localRentalTypes.includes(bookingType);
-
+  // --- [MODIFIED] ---
+  // Pass endDateTime AND includeTolls to pricing service
   const vehicleOptions = pricingService.getVehicleOptions(bookingType, {
-    distance: isLocalBooking ? 0 : (estimatedDistance || 0),
-    startDateTime: tripDate
+    distance: isLocalBooking ? 0 : (distance || 0),
+    startDateTime: tripDate,
+    endDateTime: finalEndDateTime,
+    includeTolls: includeTolls || false
   });
+  
 
-  // ========================================
-  // 5. BUILD RESPONSE
-  // ========================================
+  // Build response
   const searchResults = {
     searchId: generateBookingReference(),
     from,
     to,
-    fromCoordinates: originCoords,
-    toCoordinates: destinationCoords,
+    fromCoordinates: originCoords || null,
+    toCoordinates: destinationCoords || null,
     date: tripDate,
-    distance: isLocalBooking ? null : estimatedDistance,
+    endDateTime: finalEndDateTime, // --- [NEW] Add to response ---
+    distance: isLocalBooking ? null : distance,
     durationMinutes: duration || null,
-    distanceSource,
+    distanceSource: source,
     bookingType,
     detectedType,
     typeAutoDetected,
     applicableTypes,
     warning: typeChangedWarning,
     isAirportRoute: isAirportLocation(from) || isAirportLocation(to),
-    isLocalRoute: (estimatedDistance || 0) <= LOCAL_RENTAL_MAX_DISTANCE,
-    isOutstationRoute: (estimatedDistance || 0) >= OUTSTATION_MIN_DISTANCE,
+    isLocalRoute: (distance || 0) <= LOCAL_RENTAL_MAX_DISTANCE,
+    isOutstationRoute: (distance || 0) >= OUTSTATION_MIN_DISTANCE,
     options: vehicleOptions,
     validUntil: addHours(new Date(), 1),
     timestamp: new Date(),
@@ -375,8 +591,9 @@ export const searchCabs = catchAsync(async (req, res) => {
     searchId: searchResults.searchId,
     from,
     to,
-    distance: estimatedDistance,
+    distance,
     bookingType,
+    includeTolls: includeTolls || false, // --- [ADDED] ---
     typeAutoDetected,
     optionsCount: vehicleOptions.length
   });
@@ -394,7 +611,7 @@ export const searchCabs = catchAsync(async (req, res) => {
 // ========================================
 
 /**
- * @desc    Get applicable booking types for a route (without pricing)
+ * @desc    Get applicable booking types for a route
  * @route   POST /api/bookings/applicable-types
  * @access  Public
  */
@@ -405,34 +622,22 @@ export const getApplicableTypes = catchAsync(async (req, res) => {
     throw new BadRequestError('Pickup and drop-off locations are required');
   }
 
-  if (!geoService.isAvailable()) {
-    throw new ServiceUnavailableError('Location service is temporarily unavailable');
-  }
+  const distanceResult = await calculateDistance(from, to);
+  const { distance } = distanceResult;
 
-  try {
-    const originCoords = await geoService.geocode(from);
-    const destinationCoords = await geoService.geocode(to);
-    const matrix = await geoService.getDistanceMatrix(originCoords, destinationCoords);
-    const distance = matrix.distance;
+  const types = getApplicableBookingTypes(from, to, distance);
+  const recommended = autoDetectBookingType(from, to, distance);
 
-    const types = getApplicableBookingTypes(from, to, distance);
-    const recommended = autoDetectBookingType(from, to, distance);
-
-    return sendSuccess(res, {
-      from,
-      to,
-      distance,
-      applicableTypes: types,
-      recommendedType: recommended,
-      isAirportRoute: isAirportLocation(from) || isAirportLocation(to),
-      isLocalRoute: distance <= LOCAL_RENTAL_MAX_DISTANCE,
-      isOutstationRoute: distance >= OUTSTATION_MIN_DISTANCE
-    }, 'Applicable booking types retrieved', 200);
-
-  } catch (error) {
-    logger.error('Error getting applicable types', { error: error.message });
-    throw new ServiceUnavailableError('Unable to determine applicable booking types');
-  }
+  return sendSuccess(res, {
+    from,
+    to,
+    distance,
+    applicableTypes: types,
+    recommendedType: recommended,
+    isAirportRoute: isAirportLocation(from) || isAirportLocation(to),
+    isLocalRoute: distance <= LOCAL_RENTAL_MAX_DISTANCE,
+    isOutstationRoute: distance >= OUTSTATION_MIN_DISTANCE
+  }, 'Applicable booking types retrieved', 200);
 });
 
 // ========================================
@@ -440,132 +645,168 @@ export const getApplicableTypes = catchAsync(async (req, res) => {
 // ========================================
 
 /**
- * @desc    Step 1: Create a booking order (Cash or Online)
+ * @desc    Create a booking order (Cash or Online)
  * @route   POST /api/bookings/createBooking
  * @access  Private
  */
 export const createBooking = catchAsync(async (req, res) => {
+  // --- [MODIFIED] ---
+  // Simplified: We no longer get fareDetails from the client.
   const {
     bookingType,
     pickupLocation,
     dropLocation,
     viaLocations,
     startDateTime,
-    endDateTime,
+    endDateTime, // This is the return date
     vehicleType,
     passengerDetails,
     specialRequests,
     notes,
     searchId,
-    distance,
-    paymentMethod = 'RAZORPAY',
+    distance, // This is the one-way distance from search
+    paymentMethod = PAYMENT_METHODS.UPI,
+    addOnCodes,
+    includeTolls // --- [ADDED] ---
   } = req.body;
+  // --- [END MODIFIED] ---
 
-  // ========================================
-  // 1. VALIDATION
-  // ========================================
-  if (!bookingType || !pickupLocation || !startDateTime || !vehicleType) {
-    throw new BadRequestError('Missing required booking information');
-  }
-  if (typeof pickupLocation !== 'object' || !pickupLocation.city) {
-    throw new BadRequestError('Invalid pickupLocation: "city" is required.');
-  }
+  // 1. Validate booking type
+  validateBookingType(bookingType);
 
-  const isLocalRental = localRentalTypes.includes(bookingType);
-  if (!isLocalRental && (!dropLocation || !dropLocation.city)) {
-    throw new BadRequestError('dropLocation.city is required for this booking type.');
+  // 2. Validate locations
+  validateLocation(pickupLocation, 'pickupLocation');
+  const isLocalRental = LOCAL_RENTAL_TYPES.includes(bookingType);
+  if (!isLocalRental) {
+    validateLocation(dropLocation, 'dropLocation');
   }
 
-  if (!Object.values(VEHICLE_TYPES).includes(vehicleType)) {
-    throw new BadRequestError(`Invalid vehicle type: ${vehicleType}`);
-  }
+  // 3. Validate vehicle type
+  validateVehicleType(vehicleType);
 
-  const tripDate = new Date(startDateTime);
-  if (isNaN(tripDate)) throw new BadRequestError('Invalid start date/time.');
-
-  const minBookingTime = addHours(new Date(), BOOKING_CONFIG.MIN_BOOKING_HOURS_AHEAD);
-  const maxBookingTime = addDays(new Date(), BOOKING_CONFIG.ADVANCE_BOOKING_DAYS);
-  if (tripDate < minBookingTime || tripDate > maxBookingTime) {
-    throw new BadRequestError('Booking time outside allowed window.');
-  }
-
-  // Passenger details
-  let finalPassengerDetails = {
-    name: req.user.name || 'Guest User',
-    phone: req.user.phoneNumber,
-    email: req.user.email
-  };
-  if (passengerDetails && passengerDetails.name && passengerDetails.phone) {
-    if (!/^[6-9]\d{9}$/.test(passengerDetails.phone?.replace(/\D/g, ''))) {
-      throw new BadRequestError('Valid 10-digit passenger phone required.');
+  // 4. Validate date/time
+  const tripDate = validateDateTime(startDateTime);
+  let tripEndDate = null;
+  if (endDateTime) {
+    tripEndDate = new Date(endDateTime);
+    if (isNaN(tripEndDate.getTime())) {
+      throw new BadRequestError('Invalid end date/time format');
     }
-    finalPassengerDetails = {
-      name: passengerDetails.name.trim(),
-      phone: passengerDetails.phone.replace(/\D/g, ''),
-      email: passengerDetails.email?.trim().toLowerCase() || null
-    };
-  } else if (!req.user.name) {
-    throw new BadRequestError('Passenger name is required.');
+    if (tripEndDate <= tripDate) {
+      throw new BadRequestError('End date/time must be after start date/time');
+    }
+  }
+  // Ensure endDateTime is only set for Round Trips
+  const finalEndDateTime = (bookingType === BOOKING_TYPES.ROUND_TRIP) ? tripEndDate : null;
+
+  // 5. Validate passenger details (fallback to user profile)
+  const finalPassengerDetails = validatePassengerDetails(passengerDetails, req.user);
+
+  // 6. Validate add-on services
+  const addOnsValidation = validateAddOnServices(addOnCodes);
+  const { total: addOnsTotal, services: selectedAddOns } = addOnsValidation;
+
+  // 7. Validate payment method
+  if (!Object.values(PAYMENT_METHODS).includes(paymentMethod)) {
+    throw new BadRequestError(`Invalid payment method: ${paymentMethod}`);
   }
 
   // ========================================
-  // 2. SERVER-SIDE FARE CALCULATION
+  // 8. SERVER-SIDE FARE CALCULATION
   // ========================================
   let estimatedDistance = distance;
-  let fareDetails;
+  let finalFareDetails;
+  let finalAmount;
 
   try {
-    // ⭐ FIXED: For local rentals, distance should be 0
     if (isLocalRental) {
       estimatedDistance = 0;
-    } else if (!estimatedDistance || estimatedDistance <= 0) {
-      if (!geoService.isAvailable()) {
-        throw new ServiceUnavailableError('Geo-service not available to verify fare.');
-      }
-      logger.warn('Distance not provided by client. Recalculating...', { bookingType });
-      const origin = pickupLocation.lat ?
-        { lat: pickupLocation.lat, lng: pickupLocation.lng } :
-        (pickupLocation.address || pickupLocation.city);
-      const dest = dropLocation.lat ?
-        { lat: dropLocation.lat, lng: dropLocation.lng } :
-        (dropLocation.address || dropLocation.city);
-      const matrix = await geoService.getDistanceMatrix(origin, dest);
-      estimatedDistance = matrix.distance;
+    } else if (!estimatedDistance || typeof estimatedDistance !== 'number' || estimatedDistance <= 0) {
+      // If client didn't provide search distance, recalculate
+      logger.warn('Distance not provided by client for createBooking. Recalculating...', { bookingType });
+
+      const origin = pickupLocation.lat && pickupLocation.lng
+        ? { lat: pickupLocation.lat, lng: pickupLocation.lng }
+        : (pickupLocation.address || pickupLocation.city);
+
+      const dest = dropLocation.lat && dropLocation.lng
+        ? { lat: dropLocation.lat, lng: dropLocation.lng }
+        : (dropLocation.address || dropLocation.city);
+
+      const distanceResult = await calculateDistance(origin, dest);
+      estimatedDistance = distanceResult.distance;
     }
 
+    // --- [MODIFIED] ---
+    // Get pricing options, passing endDateTime AND includeTolls
     const options = pricingService.getVehicleOptions(bookingType, {
       distance: estimatedDistance || 0,
-      startDateTime: tripDate
+      startDateTime: tripDate,
+      endDateTime: finalEndDateTime, // This is the FIX
+      includeTolls: includeTolls || false // --- [ADDED] ---
     });
+    // --- [END MODIFIED] ---
 
-    fareDetails = options.find(opt => opt.vehicleType === vehicleType)?.fareDetails;
+    const baseFareDetails = options.find(opt => opt.vehicleType === vehicleType)?.fareDetails;
 
-    if (!fareDetails) {
+    if (!baseFareDetails) {
       throw new BadRequestError(`No pricing found for ${vehicleType} on this route.`);
     }
+
+    // --- [SIMPLIFIED & FIXED] ---
+    // Combine base fare with add-ons
+    const newSubtotal = baseFareDetails.subtotal + addOnsTotal;
+    const newGst = calculateGST(newSubtotal, TAX_CONFIG.GST_RATE);
+
+    finalFareDetails = {
+      ...baseFareDetails,
+      addOnsTotal: Math.round(addOnsTotal),
+      subtotal: Math.round(newSubtotal),
+      gst: Math.round(newGst),
+      totalFare: Math.round(newSubtotal), // totalFare is pre-tax subtotal
+      finalAmount: Math.round(newSubtotal + newGst)
+    };
+
+    finalAmount = finalFareDetails.finalAmount; // Get the final calculated amount
+    // --- [END SIMPLIFIED & FIXED] ---
+
   } catch (error) {
-    logger.error('Server-side fare calculation failed', { error: error.message });
+    logger.error('Server-side fare calculation failed', { error: error.message, bookingType, vehicleType });
     throw new BadRequestError(`Could not calculate fare: ${error.message}`);
   }
 
-  const { finalAmount } = fareDetails;
-  if (finalAmount <= 0) {
-    throw new BadRequestError('Calculated fare is zero or negative. Cannot proceed.');
+  if (!finalAmount || finalAmount <= 0) {
+    throw new BadRequestError('Calculated fare is zero or negative. Cannot proceed');
   }
-  const amountInPaise = finalAmount * 100;
 
-  // Build locations
+  const amountInPaise = Math.round(finalAmount * 100);
+
+  // Build clean locations
   const cleanPickupLocation = buildLocationObject(pickupLocation);
-  const cleanDropLocation = isLocalRental ?
-    buildLocationObject(dropLocation || pickupLocation) :
-    buildLocationObject(dropLocation);
+  const cleanDropLocation = isLocalRental
+    ? buildLocationObject(dropLocation || pickupLocation)
+    : buildLocationObject(dropLocation);
 
-  const cleanViaLocations = (viaLocations || [])
-    .filter(loc => loc && loc.city)
-    .map(loc => buildLocationObject(loc));
+  const cleanViaLocations = Array.isArray(viaLocations)
+    ? viaLocations
+      .filter(loc => loc && loc.city)
+      .map(loc => buildLocationObject(loc))
+    : [];
+
+  // Validate special requests
+  const validSpecialRequests = Array.isArray(specialRequests)
+    ? specialRequests
+      .filter(req => typeof req === 'string' && req.trim().length > 0)
+      .map(req => req.trim().substring(0, 200))
+    : [];
+
+  // Validate notes
+  const validNotes = notes && typeof notes === 'string'
+    ? notes.trim().substring(0, 500)
+    : null;
 
   // ========================================
-  // 3. CREATE PENDING BOOKING & PAYMENT DOCS
+  // 9. CREATE BOOKING & PAYMENT DOCS
   // ========================================
   const booking = new Booking({
     userId: req.user._id,
@@ -574,13 +815,14 @@ export const createBooking = catchAsync(async (req, res) => {
     dropLocation: cleanDropLocation,
     viaLocations: cleanViaLocations,
     startDateTime: tripDate,
-    endDateTime: endDateTime ? new Date(endDateTime) : null,
+    endDateTime: finalEndDateTime, // --- [MODIFIED] ---
     vehicleType,
     passengerDetails: finalPassengerDetails,
-    fareDetails,
+    fareDetails: finalFareDetails, // --- [MODIFIED] ---
     status: BOOKING_STATUS.PENDING,
-    specialRequests: Array.isArray(specialRequests) ? specialRequests : [],
-    notes: notes || null,
+    specialRequests: validSpecialRequests,
+    notes: validNotes,
+    addOnServices: selectedAddOns,
     metadata: {
       source: req.headers['x-app-source'] || 'API',
       ipAddress: req.ip,
@@ -588,17 +830,21 @@ export const createBooking = catchAsync(async (req, res) => {
       searchId
     }
   });
+
   await booking.save();
 
+  // Create payment document
   const payment = new Payment({
     userId: req.user._id,
     bookingId: booking._id,
-    amount: finalAmount,
+    amount: finalAmount, // --- [MODIFIED] ---
     currency: 'INR',
     status: PAYMENT_STATUS.PENDING,
   });
+
   await payment.save();
 
+  // Link payment to booking
   booking.paymentId = payment._id;
   await booking.save();
 
@@ -609,7 +855,7 @@ export const createBooking = catchAsync(async (req, res) => {
   });
 
   // ========================================
-  // 4. HANDLE PAYMENT METHOD
+  // 10. HANDLE PAYMENT METHOD
   // ========================================
   if (paymentMethod === PAYMENT_METHODS.CASH) {
     payment.method = PAYMENT_METHODS.CASH;
@@ -620,23 +866,20 @@ export const createBooking = catchAsync(async (req, res) => {
 
     logger.info('Booking confirmed with CASH', { bookingId: booking.bookingId });
 
+    // Send notifications
+    notifyAdmin(
+      'New Cash Booking Confirmed',
+      `Booking ${booking.bookingId} (${booking.bookingType}) from ${booking.pickupLocation.city} to ${booking.dropLocation.city} for ₹${booking.fareDetails.finalAmount} has been confirmed.`,
+      { bookingId: booking.bookingId }
+    ).catch(err => logger.error('Admin notification failed', { err: err.message }));
+
     const user = await User.findById(req.user._id).select('deviceInfo');
-    if (user?.deviceInfo?.length > 0) {
-      const fcmToken = user.deviceInfo[0].fcmToken;
-      if (fcmToken) {
-        sendBookingNotification(
-          fcmToken,
-          booking.bookingId,
-          'confirmed',
-          `Your cash booking ${booking.bookingId} is confirmed. Pay driver at trip end.`
-        ).catch(error => {
-          logger.error('Failed to send notification', {
-            bookingId: booking.bookingId,
-            error: error.message,
-          });
-        });
-      }
-    }
+    await notifyUser(
+      user,
+      booking.bookingId,
+      'confirmed',
+      `Your cash booking ${booking.bookingId} is confirmed. Pay driver at trip end.`
+    );
 
     return sendSuccess(
       res,
@@ -650,16 +893,20 @@ export const createBooking = catchAsync(async (req, res) => {
     );
 
   } else {
-    // ONLINE PAYMENT (Razorpay)
+    // Online payment (Razorpay)
     payment.method = PAYMENT_METHODS.UPI;
     const receiptId = `receipt_${booking.bookingId}`;
-    const notes = {
+    const razorpayNotes = {
       bookingDbId: booking._id.toString(),
       bookingId: booking.bookingId,
       userId: req.user._id.toString(),
     };
 
-    const razorpayOrder = await paymentService.createOrder(amountInPaise, receiptId, notes);
+    const razorpayOrder = await paymentService.createOrder(
+      amountInPaise,
+      receiptId,
+      razorpayNotes
+    );
 
     payment.razorpayOrderId = razorpayOrder.id;
     payment.receiptId = receiptId;
@@ -670,11 +917,11 @@ export const createBooking = catchAsync(async (req, res) => {
       {
         razorpayKey: process.env.RAZORPAY_KEY_ID,
         orderId: razorpayOrder.id,
-        amount: razorpayOrder.amount,
+        amount: razorpayOrder.amount, // This is in PAISE (e.g., 693000)
         currency: 'INR',
         bookingId: booking.bookingId,
         bookingDbId: booking._id,
-        fareDetails: booking.fareDetails,
+        fareDetails: booking.fareDetails, // This is in RUPEES (e.g., 6930)
         prefill: {
           name: finalPassengerDetails.name,
           email: finalPassengerDetails.email,
@@ -687,9 +934,12 @@ export const createBooking = catchAsync(async (req, res) => {
   }
 });
 
+// ========================================
+// VERIFY PAYMENT
+// ========================================
 
 /**
- * @desc    Step 2: Verify payment and confirm booking
+ * @desc    Verify payment and confirm booking
  * @route   POST /api/bookings/verify-payment
  * @access  Private
  */
@@ -701,34 +951,99 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
     bookingDbId
   } = req.body;
 
-  if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature || !bookingDbId) {
-    throw new BadRequestError('Missing payment verification details');
+  // Validate required parameters
+  if (!razorpay_payment_id || typeof razorpay_payment_id !== 'string') {
+    throw new BadRequestError('Valid razorpay_payment_id is required');
   }
 
-  // 1. Find the booking and its payment document
+  if (!razorpay_order_id || typeof razorpay_order_id !== 'string') {
+    throw new BadRequestError('Valid razorpay_order_id is required');
+  }
+
+  if (!razorpay_signature || typeof razorpay_signature !== 'string') {
+    throw new BadRequestError('Valid razorpay_signature is required');
+  }
+
+  if (!bookingDbId) {
+    throw new BadRequestError('bookingDbId is required');
+  }
+
+  // Validate MongoDB ObjectId format
+  if (!bookingDbId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new BadRequestError('Invalid bookingDbId format');
+  }
+
+  // Find booking with payment
   const booking = await Booking.findById(bookingDbId)
     .populate('paymentId')
     .populate('userId', 'deviceInfo name email phoneNumber');
 
   if (!booking) {
-    throw new NotFoundError('Booking not found.');
+    throw new NotFoundError('Booking not found');
   }
+
+  // Authorization check
   if (booking.userId._id.toString() !== req.user._id.toString()) {
-    throw new AuthorizationError('You are not authorized for this booking.');
+    throw new AuthorizationError('You are not authorized to verify this booking');
   }
+
   if (!booking.paymentId) {
-    throw new ServiceUnavailableError('Payment record not found for this booking.');
+    throw new ServiceUnavailableError('Payment record not found for this booking');
   }
 
   const payment = booking.paymentId;
 
-  // 2. Idempotency Check
-  if (payment.status === PAYMENT_STATUS.COMPLETED || booking.status === BOOKING_STATUS.CONFIRMED) {
-    logger.warn('Attempt to verify an already processed booking', { bookingId: booking.bookingId });
-    return sendSuccess(res, { booking, message: "Booking already confirmed." }, 'Booking already confirmed', 200);
+  // Idempotency check
+  if (payment.status === PAYMENT_STATUS.COMPLETED && booking.status === BOOKING_STATUS.CONFIRMED) {
+    logger.warn('Attempt to verify an already processed booking', {
+      bookingId: booking.bookingId,
+      userId: req.user._id
+    });
+
+    return sendSuccess(
+      res,
+      {
+        booking: booking.toObject({ virtuals: true }),
+        payment: payment.toObject(),
+        message: 'Booking already confirmed.'
+      },
+      'Booking already confirmed',
+      200
+    );
   }
 
-  // 3. Verify Razorpay Signature
+  // Prevent double processing
+  if (payment.razorpayPaymentId === razorpay_payment_id) {
+    logger.warn('Duplicate payment verification attempt', {
+      bookingId: booking.bookingId,
+      paymentId: razorpay_payment_id
+    });
+
+    if (payment.status === PAYMENT_STATUS.COMPLETED) {
+      return sendSuccess(
+        res,
+        {
+          booking: booking.toObject({ virtuals: true }),
+          payment: payment.toObject(),
+          message: 'Payment already verified.'
+        },
+        'Payment already verified',
+        200
+      );
+    }
+  }
+
+  // Verify order ID matches
+  if (payment.razorpayOrderId !== razorpay_order_id) {
+    logger.error('Order ID mismatch', {
+      bookingId: booking.bookingId,
+      expectedOrderId: payment.razorpayOrderId,
+      receivedOrderId: razorpay_order_id
+    });
+    throw new BadRequestError('Order ID mismatch. Invalid payment details');
+  }
+
+  // Verify signature
   const isValid = paymentService.verifyPaymentSignature(
     razorpay_order_id,
     razorpay_payment_id,
@@ -736,25 +1051,30 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
   );
 
   if (!isValid) {
+    // Mark as failed
     booking.status = BOOKING_STATUS.REJECTED;
     payment.status = PAYMENT_STATUS.FAILED;
-    payment.failureReason = 'Signature mismatch';
+    payment.failureReason = 'Signature verification failed';
     payment.razorpayPaymentId = razorpay_payment_id;
 
     await payment.save();
     await booking.save();
 
-    logger.error('Invalid payment signature', { bookingId: booking.bookingId, orderId: razorpay_order_id });
-    throw new BadRequestError('Invalid payment signature. Payment failed.');
+    logger.error('Invalid payment signature', {
+      bookingId: booking.bookingId,
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id
+    });
+
+    throw new BadRequestError('Invalid payment signature. Payment verification failed');
   }
 
-  // 4. Signature is VALID - Confirm the Booking
+  // Signature is valid - Confirm booking
   booking.status = BOOKING_STATUS.CONFIRMED;
 
   payment.status = PAYMENT_STATUS.COMPLETED;
   payment.razorpayPaymentId = razorpay_payment_id;
   payment.razorpaySignature = razorpay_signature;
-  // TODO: Get method from Razorpay API
   payment.method = PAYMENT_METHODS.UPI;
 
   await payment.save();
@@ -763,29 +1083,24 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
   logger.info('Payment verified and booking confirmed', {
     bookingId: booking.bookingId,
     paymentId: payment._id,
+    razorpayPaymentId: razorpay_payment_id
   });
 
-  // 5. Send Notifications
-  const user = booking.userId;
-  if (user?.deviceInfo?.length > 0) {
-    const latestDevice = user.deviceInfo.sort((a, b) => new Date(b.lastUsed) - new Date(a.lastUsed))[0];
-    const fcmToken = latestDevice?.fcmToken;
-    if (fcmToken) {
-      sendBookingNotification(
-        fcmToken,
-        booking.bookingId,
-        'confirmed',
-        `Your payment was successful! Booking ${booking.bookingId} is confirmed.`
-      ).catch(error => {
-        logger.error('Failed to send booking confirmation push notification', {
-          bookingId: booking.bookingId,
-          error: error.message,
-        });
-      });
-    }
-  }
+  // Send notifications
+  notifyAdmin(
+    'New Online Booking Confirmed',
+    `Booking ${booking.bookingId} (${booking.bookingType}) from ${booking.pickupLocation.city} to ${booking.dropLocation.city} for ₹${booking.fareDetails.finalAmount} has been confirmed (Paid).`,
+    { bookingId: booking.bookingId, paymentId: razorpay_payment_id }
+  ).catch(err => logger.error('Admin notification failed', { err: err.message }));
 
-  // 6. Return Success
+  const user = booking.userId;
+  await notifyUser(
+    user,
+    booking.bookingId,
+    'confirmed',
+    `Your payment was successful! Booking ${booking.bookingId} is confirmed.`
+  );
+
   return sendSuccess(
     res,
     {
@@ -798,6 +1113,10 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
   );
 });
 
+// ========================================
+// GET BOOKING BY DATABASE ID
+// ========================================
+
 /**
  * @desc    Get booking by database ID
  * @route   GET /api/bookings/getBooking/:id
@@ -805,6 +1124,11 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
  */
 export const getBooking = catchAsync(async (req, res) => {
   const bookingDbId = req.params.id;
+
+  // Validate ObjectId format
+  if (!bookingDbId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new BadRequestError('Invalid booking ID format');
+  }
 
   const booking = await Booking.findOne({
     _id: bookingDbId,
@@ -820,11 +1144,11 @@ export const getBooking = catchAsync(async (req, res) => {
     .populate('paymentId');
 
   if (!booking) {
-    logger.warn('Booking not found by DB ID or user mismatch', {
+    logger.warn('Booking not found or unauthorized access', {
       bookingDbId,
       userId: req.user._id
     });
-    throw new NotFoundError('Booking not found');
+    throw new NotFoundError('Booking not found or you do not have access to it');
   }
 
   logger.info('Booking retrieved by DB ID', {
@@ -832,8 +1156,17 @@ export const getBooking = catchAsync(async (req, res) => {
     userId: req.user._id
   });
 
-  return sendSuccess(res, booking.toObject({ virtuals: true }), 'Booking retrieved successfully', 200);
+  return sendSuccess(
+    res,
+    booking.toObject({ virtuals: true }),
+    'Booking retrieved successfully',
+    200
+  );
 });
+
+// ========================================
+// GET BOOKING BY CODE
+// ========================================
 
 /**
  * @desc    Get booking by booking code
@@ -841,9 +1174,15 @@ export const getBooking = catchAsync(async (req, res) => {
  * @access  Private
  */
 export const getBookingByCode = catchAsync(async (req, res) => {
-  const bookingCode = req.params.bookingId?.toUpperCase();
+  const bookingCode = req.params.bookingId?.trim().toUpperCase();
+
   if (!bookingCode) {
-    throw new BadRequestError("Booking code parameter is required.");
+    throw new BadRequestError('Booking code is required');
+  }
+
+  // Validate booking code format (adjust regex based on your format)
+  if (!/^[A-Z0-9-]+$/.test(bookingCode)) {
+    throw new BadRequestError('Invalid booking code format');
   }
 
   const booking = await Booking.findOne({
@@ -860,11 +1199,11 @@ export const getBookingByCode = catchAsync(async (req, res) => {
     .populate('paymentId');
 
   if (!booking) {
-    logger.warn('Booking not found by code or user mismatch', {
+    logger.warn('Booking not found by code or unauthorized access', {
       bookingCode,
       userId: req.user._id
     });
-    throw new NotFoundError(`Booking with code ${bookingCode} not found`);
+    throw new NotFoundError(`Booking with code ${bookingCode} not found or you do not have access to it`);
   }
 
   logger.info('Booking retrieved by code', {
@@ -872,8 +1211,17 @@ export const getBookingByCode = catchAsync(async (req, res) => {
     userId: req.user._id
   });
 
-  return sendSuccess(res, booking.toObject({ virtuals: true }), 'Booking retrieved successfully', 200);
+  return sendSuccess(
+    res,
+    booking.toObject({ virtuals: true }),
+    'Booking retrieved successfully',
+    200
+  );
 });
+
+// ========================================
+// GET ALL BOOKINGS
+// ========================================
 
 /**
  * @desc    Get all bookings for current user
@@ -883,31 +1231,67 @@ export const getBookingByCode = catchAsync(async (req, res) => {
 export const getAllBookings = catchAsync(async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query);
   const { status, bookingType, fromDate, toDate, sortBy = '-createdAt' } = req.query;
+
   const query = { userId: req.user._id };
 
+  // Filter by status
   if (status) {
-    const statuses = status.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
-    query.status = { $in: statuses };
-  }
-  if (bookingType) {
-    query.bookingType = bookingType.toUpperCase();
-  }
-  if (fromDate) {
-    query.startDateTime = { $gte: new Date(fromDate) };
-  }
-  if (toDate) {
-    query.startDateTime = { ...query.startDateTime, $lte: new Date(toDate) };
+    const statuses = status
+      .split(',')
+      .map(s => s.trim().toUpperCase())
+      .filter(s => Object.values(BOOKING_STATUS).includes(s));
+
+    if (statuses.length > 0) {
+      query.status = { $in: statuses };
+    }
   }
 
+  // Filter by booking type
+  if (bookingType) {
+    const type = bookingType.trim().toUpperCase();
+    if (Object.values(BOOKING_TYPES).includes(type)) {
+      query.bookingType = type;
+    }
+  }
+
+  // Filter by date range
+  if (fromDate) {
+    const fromDateObj = new Date(fromDate);
+    if (!isNaN(fromDateObj.getTime())) {
+      query.startDateTime = { $gte: fromDateObj };
+    }
+  }
+
+  if (toDate) {
+    const toDateObj = new Date(toDate);
+    if (!isNaN(toDateObj.getTime())) {
+      query.startDateTime = { ...query.startDateTime, $lte: toDateObj };
+    }
+  }
+
+  // Validate sort parameter
+  const allowedSortFields = ['createdAt', '-createdAt', 'startDateTime', '-startDateTime'];
+  const validSortBy = allowedSortFields.includes(sortBy) ? sortBy : '-createdAt';
+
   const total = await Booking.countDocuments(query);
+
   const bookings = await Booking.find(query)
-    .sort(sortBy)
+    .sort(validSortBy)
     .skip(skip)
     .limit(limit)
     .populate('vehicleId', 'type modelName licensePlate')
     .populate({ path: 'driverId', select: 'name phoneNumber rating', model: 'Driver' })
     .populate('paymentId', 'status method amount')
-    .select('-metadata -trip -cancellation -__v -updatedAt');
+    .select('-metadata -__v')
+    .lean();
+
+  logger.info('User bookings retrieved', {
+    userId: req.user._id,
+    count: bookings.length,
+    total,
+    page,
+    limit
+  });
 
   return sendPaginatedResponse(
     res,
@@ -919,6 +1303,9 @@ export const getAllBookings = catchAsync(async (req, res) => {
   );
 });
 
+// ========================================
+// CANCEL BOOKING
+// ========================================
 
 /**
  * @desc    Cancel a booking by the user
@@ -927,7 +1314,12 @@ export const getAllBookings = catchAsync(async (req, res) => {
  */
 export const cancelBooking = catchAsync(async (req, res) => {
   const { reason } = req.body;
-  const bookingId = req.params.id; // This is the MongoDB _id
+  const bookingId = req.params.id;
+
+  // Validate ObjectId format
+  if (!bookingId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new BadRequestError('Invalid booking ID format');
+  }
 
   const booking = await Booking.findOne({
     _id: bookingId,
@@ -938,11 +1330,10 @@ export const cancelBooking = catchAsync(async (req, res) => {
     .populate('userId', 'deviceInfo name email phoneNumber');
 
   if (!booking) {
-    throw new NotFoundError('Booking not found or you do not have permission to cancel it.');
+    throw new NotFoundError('Booking not found or you do not have permission to cancel it');
   }
 
-  const payment = booking.paymentId; // Get the populated payment doc
-
+  // Check if booking can be cancelled
   const cancellableStatuses = [
     BOOKING_STATUS.PENDING,
     BOOKING_STATUS.CONFIRMED,
@@ -950,32 +1341,54 @@ export const cancelBooking = catchAsync(async (req, res) => {
   ];
 
   if (!cancellableStatuses.includes(booking.status)) {
-    throw new BadRequestError(`Cannot cancel booking. Current status is: ${booking.status}.`);
+    throw new BadRequestError(
+      `Cannot cancel booking in ${booking.status} status. Only ${cancellableStatuses.join(', ')} bookings can be cancelled`
+    );
   }
 
+  // Check if booking is already being cancelled
+  if (booking.cancellation) {
+    throw new ConflictError('This booking is already cancelled');
+  }
+
+  const payment = booking.paymentId;
+
+  // Calculate cancellation charges
   const hoursUntilStart = (new Date(booking.startDateTime) - new Date()) / (1000 * 60 * 60);
   let cancellationCharge = 0;
   let chargeApplied = false;
 
-  if (booking.status !== BOOKING_STATUS.PENDING && hoursUntilStart < BOOKING_CONFIG.CANCELLATION_WINDOW_HOURS && hoursUntilStart >= 0) {
+  // Apply cancellation charge if within cancellation window
+  if (
+    booking.status !== BOOKING_STATUS.PENDING &&
+    hoursUntilStart < BOOKING_CONFIG.CANCELLATION_WINDOW_HOURS &&
+    hoursUntilStart >= 0
+  ) {
     cancellationCharge = Math.round(
-      (booking.fareDetails.finalAmount * BOOKING_CONFIG.CANCELLATION_CHARGE_PERCENT)
+      booking.fareDetails.finalAmount * BOOKING_CONFIG.CANCELLATION_CHARGE_PERCENT
     );
     chargeApplied = true;
   }
 
+  // Validate cancellation reason
+  const cleanReason = reason && typeof reason === 'string'
+    ? reason.trim().substring(0, 200)
+    : 'Cancelled by user';
+
   const originalStatus = booking.status;
+
+  // Update booking status
   booking.status = BOOKING_STATUS.CANCELLED;
   booking.cancellation = {
     cancelledBy: 'USER',
     cancelledAt: new Date(),
-    reason: reason ? reason.trim().substring(0, 200) : 'Cancelled by user',
+    reason: cleanReason,
     charge: cancellationCharge
   };
 
-  // --- NEW REFUND LOGIC ---
+  // Process refund
   let refundAmount = 0;
-  let refundNote = 'No refund applicable.';
+  let refundNote = 'No refund applicable';
 
   if (payment && payment.status === PAYMENT_STATUS.COMPLETED) {
     refundAmount = Math.max(0, payment.amount - cancellationCharge);
@@ -984,32 +1397,47 @@ export const cancelBooking = catchAsync(async (req, res) => {
       try {
         const refund = await paymentService.createRefund(
           payment.razorpayPaymentId,
-          Math.round(refundAmount * 100) // Send in paise
+          Math.round(refundAmount * 100)
         );
 
-        payment.status = refundAmount === payment.amount ? PAYMENT_STATUS.REFUNDED : PAYMENT_STATUS.PARTIALLY_REFUNDED;
-        refundNote = `Refund of ₹${refundAmount} initiated (Refund ID: ${refund.id}).`;
-        logger.info('Refund processed successfully', { bookingId: booking.bookingId, refundId: refund.id });
+        payment.status = refundAmount === payment.amount
+          ? PAYMENT_STATUS.REFUNDED
+          : PAYMENT_STATUS.PARTIALLY_REFUNDED;
+
+        refundNote = `Refund of ₹${refundAmount} initiated successfully (Refund ID: ${refund.id})`;
+
+        logger.info('Refund processed successfully', {
+          bookingId: booking.bookingId,
+          refundId: refund.id,
+          refundAmount
+        });
       } catch (refundError) {
-        logger.error('Automatic refund failed', { bookingId: booking.bookingId, error: refundError.message });
-        refundNote = `Booking cancelled, but automatic refund failed: ${refundError.message}. Contact support.`;
+        logger.error('Automatic refund failed', {
+          bookingId: booking.bookingId,
+          error: refundError.message
+        });
+
+        refundNote = `Booking cancelled, but automatic refund failed: ${refundError.message}. Please contact support for manual refund`;
       }
     } else {
-      refundNote = `Cancellation charge (₹${cancellationCharge}) applies. No refund due.`;
+      refundNote = chargeApplied
+        ? `Cancellation charge of ₹${cancellationCharge} applies. No refund due`
+        : 'Full cancellation charge applied. No refund due';
     }
+
     await payment.save();
   } else if (payment && payment.status === PAYMENT_STATUS.PENDING) {
-    refundNote = 'Booking cancelled before payment was completed.';
+    refundNote = 'Booking cancelled before payment was completed';
     payment.status = PAYMENT_STATUS.FAILED;
-    payment.failureReason = 'Booking cancelled by user before payment';
+    payment.failureReason = 'Booking cancelled by user before payment completion';
     await payment.save();
   } else if (payment && payment.method === PAYMENT_METHODS.CASH) {
-    refundNote = chargeApplied ? `Cancellation charge of ₹${cancellationCharge} may be applicable.` : 'Cancelled (Cash booking).';
+    refundNote = chargeApplied
+      ? `Cancellation charge of ₹${cancellationCharge} may be applicable if driver was assigned`
+      : 'Cash booking cancelled successfully';
   } else if (!payment && booking.status === BOOKING_STATUS.PENDING) {
-    // This handles cancelling a PENDING booking that somehow failed to create a payment doc
-    refundNote = 'Booking cancelled while pending payment.';
+    refundNote = 'Pending booking cancelled successfully';
   }
-  // --- END REFUND LOGIC ---
 
   await booking.save();
 
@@ -1018,33 +1446,32 @@ export const cancelBooking = catchAsync(async (req, res) => {
     originalStatus,
     cancellationCharge,
     refundAmount,
+    chargeApplied
   });
 
-  // --- Notification logic (unchanged from your file) ---
+  // Send notifications
   const user = booking.userId;
-  if (user?.deviceInfo?.length > 0) {
-    const fcmToken = user.deviceInfo[0].fcmToken;
-    if (fcmToken) {
-      sendBookingNotification(
-        fcmToken,
-        booking.bookingId,
-        'cancelled',
-        `Your booking ${booking.bookingId} has been cancelled. ${refundNote}`
-      ).catch(err => logger.error('Failed to send user cancellation notification', { err: err.message }));
-    }
-  }
+  await notifyUser(
+    user,
+    booking.bookingId,
+    'cancelled',
+    `Your booking ${booking.bookingId} has been cancelled. ${refundNote}`
+  );
+
   const driver = booking.driverId;
   if (driver) {
-    const driverFcmToken = driver.deviceInfo?.[0]?.fcmToken;
-    if (driverFcmToken) {
-      sendDriverNotification(
-        driverFcmToken,
-        'Booking Cancelled',
-        `Booking ${booking.bookingId} has been cancelled by the customer.`
-      ).catch(err => logger.error('Failed to send driver cancellation notification', { err: err.message }));
-    }
+    await notifyDriver(
+      driver,
+      'Booking Cancelled',
+      `Booking ${booking.bookingId} has been cancelled by the customer`
+    );
   }
-  // --- End Notification Logic ---
+
+  await notifyAdmin(
+    'Booking Cancelled by User',
+    `Booking ${booking.bookingId} cancelled by user. Refund: ₹${refundAmount}, Charge: ₹${cancellationCharge}`,
+    { bookingId: booking.bookingId, userId: user._id }
+  );
 
   return sendSuccess(
     res,
@@ -1062,6 +1489,10 @@ export const cancelBooking = catchAsync(async (req, res) => {
   );
 });
 
+// ========================================
+// ADD RATING
+// ========================================
+
 /**
  * @desc    Add rating to completed booking
  * @route   POST /api/bookings/:id/rating
@@ -1071,53 +1502,81 @@ export const addRating = catchAsync(async (req, res) => {
   const { rating, comment } = req.body;
   const bookingId = req.params.id;
 
-  const numericRating = Number(rating);
-  if (isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
-    throw new BadRequestError('Rating must be a number between 1 and 5.');
+  // Validate ObjectId format
+  if (!bookingId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new BadRequestError('Invalid booking ID format');
   }
+
+  // Validate rating
+  if (rating === undefined || rating === null) {
+    throw new BadRequestError('Rating is required');
+  }
+
+  const numericRating = Number(rating);
+
+  if (isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
+    throw new BadRequestError('Rating must be a number between 1 and 5');
+  }
+
   const intRating = Math.round(numericRating);
-  const cleanComment = comment ? comment.trim().substring(0, 500) : null;
+
+  // Validate comment
+  const cleanComment = comment && typeof comment === 'string'
+    ? comment.trim().substring(0, 500)
+    : null;
 
   const booking = await Booking.findOne({
     _id: bookingId,
     userId: req.user._id
-  }).populate('driverId', 'rating completedRides'); // Populates from 'Driver' model
+  }).populate('driverId', 'rating completedRides');
 
   if (!booking) {
-    throw new NotFoundError('Booking not found or you cannot rate it.');
-  }
-  if (booking.status !== BOOKING_STATUS.COMPLETED) {
-    throw new BadRequestError(`Only completed bookings can be rated. Current status: ${booking.status}.`);
-  }
-  if (booking.rating && booking.rating.value) {
-    throw new ConflictError('This booking has already been rated.');
-  }
-  if (!booking.driverId) {
-    logger.warn('Attempted to rate a completed booking with no assigned driver.', { bookingId: booking.bookingId });
+    throw new NotFoundError('Booking not found or you cannot rate it');
   }
 
+  if (booking.status !== BOOKING_STATUS.COMPLETED) {
+    throw new BadRequestError(
+      `Only completed bookings can be rated. Current status: ${booking.status}`
+    );
+  }
+
+  if (booking.rating && booking.rating.value) {
+    throw new ConflictError('This booking has already been rated');
+  }
+
+  if (!booking.driverId) {
+    logger.warn('Attempted to rate a completed booking with no assigned driver', {
+      bookingId: booking.bookingId
+    });
+    throw new BadRequestError('Cannot rate booking with no assigned driver');
+  }
+
+  // Add rating to booking
   booking.rating = {
     value: intRating,
     comment: cleanComment,
     createdAt: new Date()
   };
+
   await booking.save();
 
   logger.info('Rating added to booking', {
     bookingId: booking.bookingId,
     rating: intRating,
+    hasComment: !!cleanComment
   });
 
-  // Update Driver's Overall Rating
+  // Update driver's overall rating
   if (booking.driverId) {
     try {
       const driver = await Driver.findById(booking.driverId._id);
+
       if (driver) {
-        const currentTotalRides = driver.completedRides || 1;
+        const currentTotalRides = Math.max(1, driver.completedRides || 1);
         const currentRating = driver.rating || 0;
 
-        const totalRidesForAvg = Math.max(1, currentTotalRides);
-        const newAverageRating = ((currentRating * (totalRidesForAvg - 1)) + intRating) / totalRidesForAvg;
+        const newAverageRating =
+          ((currentRating * (currentTotalRides - 1)) + intRating) / currentTotalRides;
 
         driver.rating = Math.round(newAverageRating * 10) / 10;
         await driver.save();
@@ -1125,6 +1584,7 @@ export const addRating = catchAsync(async (req, res) => {
         logger.info("Driver's average rating updated", {
           driverId: driver._id,
           newAvgRating: driver.rating,
+          totalRides: currentTotalRides
         });
       }
     } catch (driverUpdateError) {
@@ -1138,128 +1598,158 @@ export const addRating = catchAsync(async (req, res) => {
   return sendSuccess(
     res,
     {
+      bookingId: booking.bookingId,
       rating: booking.rating.value,
       comment: booking.rating.comment,
+      createdAt: booking.rating.createdAt
     },
     'Thank you for your feedback!',
     200
   );
 });
 
-// --- Other functions from your file (unchanged) ---
+// ========================================
+// GET FARE ESTIMATE
+// ========================================
 
-export const getUpcomingBookings = catchAsync(async (req, res) => {
-  logger.warn("Deprecated route /api/bookings/upcoming accessed. Use /api/user/me/bookings/upcoming");
-  req.query.status = `${BOOKING_STATUS.CONFIRMED},${BOOKING_STATUS.ASSIGNED}`;
-  req.query.fromDate = new Date().toISOString();
-  req.query.sortBy = 'startDateTime';
-  return getAllBookings(req, res);
-});
-
-export const getBookingHistory = catchAsync(async (req, res) => {
-  logger.warn("Deprecated route /api/bookings/history accessed. Use /api/user/me/bookings/past");
-  req.query.status = `${BOOKING_STATUS.COMPLETED},${BOOKING_STATUS.CANCELLED}`;
-  req.query.sortBy = '-startDateTime';
-  return getAllBookings(req, res);
-});
-
-export const getBookingStats = catchAsync(async (req, res) => {
-  logger.warn("Deprecated route /api/bookings/stats accessed. Use /api/user/me/stats");
-  return sendSuccess(res, { note: "Please use /api/user/me/stats for user statistics." }, "Endpoint deprecated", 200);
-});
-
-export const applyDiscount = catchAsync(async (req, res) => {
-  const { discountCode } = req.body;
-  const bookingId = req.params.id;
-  const booking = await Booking.findOne({ _id: bookingId, userId: req.user._id });
-
-  if (!booking) throw new NotFoundError('Booking not found');
-  if (booking.status === BOOKING_STATUS.PENDING) {
-    throw new BadRequestError('Please confirm your booking before applying a discount.');
-  }
-  if (booking.fareDetails?.discountAmount > 0) {
-    throw new ConflictError('A discount is already applied.');
-  }
-  // ... (rest of your validation logic) ...
-
-  // Dummy discount logic
-  let discountAmount = 0;
-  if (discountCode === 'FIRST100') {
-    discountAmount = 100;
-  } else {
-    throw new BadRequestError('Invalid discount code.');
-  }
-
-  booking.fareDetails.discountAmount = discountAmount;
-  booking.fareDetails.finalAmount = Math.max(0, booking.fareDetails.finalAmount - discountAmount);
-  // Recalculate GST/subtotal if needed
-
-  await booking.save();
-
-  // Update payment doc if it exists
-  if (booking.paymentId) {
-    await Payment.findByIdAndUpdate(booking.paymentId, {
-      amount: booking.fareDetails.finalAmount
-    });
-  }
-
-  logger.info('Discount applied', { bookingId: booking.bookingId, discountCode });
-  return sendSuccess(res, { fareDetails: booking.fareDetails }, 'Discount applied', 200);
-});
-
+/**
+ * @desc    Get fare estimate for a route
+ * @route   POST /api/bookings/fare-estimate
+ * @access  Public
+ */
 export const getFareEstimate = catchAsync(async (req, res) => {
-  // This function is correct and uses geoService
-  const { from, to, type, distance, vehicleType, startDateTime, fromCoordinates, toCoordinates } = req.body;
+  const {
+    from,
+    to,
+    type,
+    distance,
+    vehicleType,
+    startDateTime,
+    endDateTime, // --- [NEW] ---
+    fromCoordinates,
+    toCoordinates,
+    includeTolls // --- [ADDED] ---
+  } = req.body;
+
+  // Validate required fields
+  if (!type) {
+    throw new BadRequestError('Booking type is required');
+  }
+
+  validateBookingType(type);
+
+  if (!vehicleType) {
+    throw new BadRequestError('Vehicle type is required');
+  }
+
+  validateVehicleType(vehicleType);
 
   let estimatedDistance = distance;
-  const isLocalRental = localRentalTypes.includes(type);
+  const isLocalRental = LOCAL_RENTAL_TYPES.includes(type);
 
+  // Calculate distance if not provided
   if (isLocalRental) {
     estimatedDistance = 0;
   } else if (!estimatedDistance || typeof estimatedDistance !== 'number' || estimatedDistance < 0) {
-    if (!geoService.isAvailable()) {
-      throw new ServiceUnavailableError('Geocoding service is not configured');
+    if (!from || !to) {
+      throw new BadRequestError('Either distance or both from/to locations are required');
     }
-    let origin = fromCoordinates || from;
-    let destination = toCoordinates || to;
-    if (!origin || !destination) {
-      throw new BadRequestError('Please provide distance, valid coordinates, or both from/to addresses.');
-    }
-    try {
-      const matrix = await geoService.getDistanceMatrix(origin, destination);
-      estimatedDistance = matrix.distance;
-    } catch (distError) {
-      logger.warn('Failed to automatically calculate distance for estimate', { from, to, error: distError.message });
-      throw new BadRequestError(`Could not automatically determine distance: ${distError.message}.`);
-    }
+
+    const distanceResult = await calculateDistance(from, to);
+    estimatedDistance = distanceResult.distance;
   }
 
-  if (!isLocalRental && (!estimatedDistance || typeof estimatedDistance !== 'number' || estimatedDistance <= 0)) {
-    throw new BadRequestError('Invalid or zero distance determined for estimation.');
+  // Validate distance for non-local bookings
+  if (!isLocalRental && (!estimatedDistance || estimatedDistance <= 0)) {
+    throw new BadRequestError('Invalid distance for this booking type');
   }
 
-  // ... (rest of validation) ...
+  // Validate start date/time
+  let tripDate = new Date();
+  if (startDateTime) {
+    tripDate = validateDateTime(startDateTime, 0); // Allow immediate bookings for estimates
+  }
 
+  // --- [NEW] ---
+  let tripEndDate = null;
+  if (endDateTime) {
+    tripEndDate = new Date(endDateTime);
+    if (isNaN(tripEndDate.getTime()) || tripEndDate < tripDate) {
+      throw new BadRequestError('Invalid end date (must be after start date)');
+    }
+  }
+  const finalEndDateTime = (type === BOOKING_TYPES.ROUND_TRIP) ? tripEndDate : null;
+  // --- [END NEW] ---
+
+
+  // Get fare details
   let fareDetails;
+
   try {
-    fareDetails = pricingService.getVehicleOptions(type, {
+    // --- [MODIFIED] ---
+    const options = pricingService.getVehicleOptions(type, {
       distance: estimatedDistance,
-      startDateTime: startDateTime || new Date()
-    }).find(opt => opt.vehicleType === vehicleType)?.fareDetails;
+      startDateTime: tripDate,
+      endDateTime: finalEndDateTime,
+      includeTolls: includeTolls || false // --- [ADDED] ---
+    });
+    // --- [END MODIFIED] ---
+
+    fareDetails = options.find(opt => opt.vehicleType === vehicleType)?.fareDetails;
 
     if (!fareDetails) {
-      throw new BadRequestError(`No pricing found for ${vehicleType} on this route.`);
+      throw new BadRequestError(`No pricing found for ${vehicleType} with ${type}`);
     }
   } catch (pricingError) {
-    logger.error('Error during fare estimation calculation', { error: pricingError.message });
+    logger.error('Error during fare estimation', {
+      error: pricingError.message,
+      type,
+      vehicleType,
+      distance: estimatedDistance
+    });
     throw new ServiceUnavailableError(`Could not calculate fare: ${pricingError.message}`);
   }
 
-  return sendSuccess(res, { fareDetails }, 'Fare estimate calculated', 200);
+  logger.info('Fare estimate calculated', {
+    type,
+    vehicleType,
+    distance: estimatedDistance,
+    includeTolls: includeTolls || false, // --- [ADDED] ---
+    finalAmount: fareDetails.finalAmount
+  });
+
+  return sendSuccess(
+    res,
+    {
+      fareDetails,
+      distance: isLocalRental ? null : estimatedDistance,
+      bookingType: type,
+      vehicleType,
+      estimatedFor: tripDate,
+      returnDate: finalEndDateTime
+    },
+    'Fare estimate calculated successfully',
+    200
+  );
 });
 
+// ========================================
+// GET CANCELLATION CHARGES
+// ========================================
+
+/**
+ * @desc    Get cancellation charges for a booking
+ * @route   GET /api/bookings/:id/cancellation-charges
+ * @access  Private
+ */
 export const getCancellationCharges = catchAsync(async (req, res) => {
   const bookingId = req.params.id;
+
+  // Validate ObjectId format
+  if (!bookingId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new BadRequestError('Invalid booking ID format');
+  }
+
   const booking = await Booking.findOne({
     _id: bookingId,
     userId: req.user._id
@@ -1268,90 +1758,763 @@ export const getCancellationCharges = catchAsync(async (req, res) => {
   if (!booking) {
     throw new NotFoundError('Booking not found');
   }
-  // ... (rest of your logic) ...
 
-  const hoursUntilStart = (new Date(booking.startDateTime) - new Date()) / (1000 * 60 * 60);
-  let cancellationCharge = 0;
-  let chargeWillApply = false;
-  if (hoursUntilStart < BOOKING_CONFIG.CANCELLATION_WINDOW_HOURS && hoursUntilStart >= 0) {
-    cancellationCharge = Math.round(booking.fareDetails.finalAmount * BOOKING_CONFIG.CANCELLATION_CHARGE_PERCENT);
-    chargeWillApply = true;
+  // Check if booking can be cancelled
+  const cancellableStatuses = [
+    BOOKING_STATUS.PENDING,
+    BOOKING_STATUS.CONFIRMED,
+    BOOKING_STATUS.ASSIGNED
+  ];
+
+  if (!cancellableStatuses.includes(booking.status)) {
+    throw new BadRequestError(
+      `Booking in ${booking.status} status cannot be cancelled`
+    );
   }
 
-  return sendSuccess(res, { cancellationCharge, chargeWillApply }, 'Cancellation charges retrieved', 200);
+  if (booking.cancellation) {
+    throw new ConflictError('Booking is already cancelled');
+  }
+
+  // Calculate potential cancellation charge
+  const now = new Date();
+  const startTime = new Date(booking.startDateTime);
+  const hoursUntilStart = (startTime - now) / (1000 * 60 * 60);
+
+  let cancellationCharge = 0;
+  let chargeWillApply = false;
+  let reason = '';
+
+  if (hoursUntilStart < 0) {
+    reason = 'Booking start time has passed';
+    chargeWillApply = false;
+  } else if (booking.status === BOOKING_STATUS.PENDING) {
+    reason = 'No charge for pending bookings';
+    chargeWillApply = false;
+  } else if (hoursUntilStart >= BOOKING_CONFIG.CANCELLATION_WINDOW_HOURS) {
+    reason = `Free cancellation available (more than ${BOOKING_CONFIG.CANCELLATION_WINDOW_HOURS} hours before start)`;
+    chargeWillApply = false;
+  } else {
+    cancellationCharge = Math.round(
+      booking.fareDetails.finalAmount * BOOKING_CONFIG.CANCELLATION_CHARGE_PERCENT
+    );
+    chargeWillApply = true;
+    reason = `Cancellation charge applies (less than ${BOOKING_CONFIG.CANCELLATION_WINDOW_HOURS} hours before start)`;
+  }
+
+  const refundAmount = Math.max(0, booking.fareDetails.finalAmount - cancellationCharge);
+
+  return sendSuccess(
+    res,
+    {
+      bookingId: booking.bookingId,
+      totalAmount: booking.fareDetails.finalAmount,
+      cancellationCharge,
+      refundAmount,
+      chargeWillApply,
+      reason,
+      hoursUntilStart: Math.max(0, hoursUntilStart),
+      cancellationPolicy: {
+        windowHours: BOOKING_CONFIG.CANCELLATION_WINDOW_HOURS,
+        chargePercent: BOOKING_CONFIG.CANCELLATION_CHARGE_PERCENT * 100
+      }
+    },
+    'Cancellation charges retrieved successfully',
+    200
+  );
 });
 
+// ========================================
+// UPDATE BOOKING STATUS (ADMIN/DRIVER)
+// ========================================
+
+/**
+ * @desc    Update booking status
+ * @route   PATCH /api/bookings/:id/status
+ * @access  Admin/Driver
+ */
 export const updateBookingStatus = catchAsync(async (req, res) => {
   const { status, reason } = req.body;
   const bookingId = req.params.id;
 
+  // Validate ObjectId format
+  if (!bookingId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new BadRequestError('Invalid booking ID format');
+  }
+
+  // Validate status
+  if (!status) {
+    throw new BadRequestError('Status is required');
+  }
+
+  if (!Object.values(BOOKING_STATUS).includes(status)) {
+    throw new BadRequestError(`Invalid status: ${status}`);
+  }
+
   const booking = await Booking.findById(bookingId)
-    .populate('userId', 'deviceInfo name')
+    .populate('userId', 'deviceInfo name email phoneNumber')
     .populate({ path: 'driverId', model: 'Driver', select: 'deviceInfo name' });
 
   if (!booking) {
     throw new NotFoundError(`Booking with ID ${bookingId} not found`);
   }
 
-  // Role checks
+  // Role-based authorization
   if (req.user.role === 'CUSTOMER') {
-    throw new AuthorizationError('Customers cannot update status. Use the /cancel endpoint.');
+    throw new AuthorizationError(
+      'Customers cannot update booking status directly. Use the /cancel endpoint'
+    );
   }
-  // ... (rest of role logic) ...
 
+  // Validate status transitions
   const currentStatus = booking.status;
+
   if (currentStatus === BOOKING_STATUS.COMPLETED || currentStatus === BOOKING_STATUS.CANCELLED) {
-    throw new BadRequestError(`Booking is already in a final state (${currentStatus})`);
+    throw new BadRequestError(
+      `Booking is already in a final state (${currentStatus})`
+    );
+  }
+
+  // Validate driver can only update their own bookings
+  if (req.user.role === 'DRIVER') {
+    if (!booking.driverId || booking.driverId._id.toString() !== req.user._id.toString()) {
+      throw new AuthorizationError('You can only update bookings assigned to you');
+    }
   }
 
   const now = new Date();
-  if (status === BOOKING_STATUS.IN_PROGRESS && !booking.trip?.actualStartTime) {
+
+  // Handle status-specific logic
+  if (status === BOOKING_STATUS.IN_PROGRESS) {
     if (!booking.trip) booking.trip = {};
-    booking.trip.actualStartTime = now;
-  } else if (status === BOOKING_STATUS.COMPLETED && !booking.trip?.actualEndTime) {
-    if (!booking.trip) booking.trip = {};
-    booking.trip.actualEndTime = now;
-    if (booking.driverId) {
-      await Driver.findByIdAndUpdate(booking.driverId._id, { $inc: { completedRides: 1 } });
-      logger.info("Incremented driver's completed rides count", { driverId: booking.driverId._id });
+    if (!booking.trip.actualStartTime) {
+      booking.trip.actualStartTime = now;
+      logger.info('Trip started', { bookingId: booking.bookingId });
     }
-  } else if (status === BOOKING_STATUS.CANCELLED && !booking.cancellation) {
-    booking.cancellation = {
-      cancelledBy: req.user.role,
-      cancelledAt: now,
-      reason: reason || `Cancelled by ${req.user.role}`,
-      charge: 0 // Admin/Driver cancellations typically don't charge user
-    };
+  } else if (status === BOOKING_STATUS.COMPLETED) {
+    if (!booking.trip) booking.trip = {};
+    if (!booking.trip.actualEndTime) {
+      booking.trip.actualEndTime = now;
+
+      // Increment driver's completed rides
+      if (booking.driverId) {
+        try {
+          await Driver.findByIdAndUpdate(
+            booking.driverId._id,
+            { $inc: { completedRides: 1 } }
+          );
+
+          logger.info("Incremented driver's completed rides", {
+            driverId: booking.driverId._id,
+            bookingId: booking.bookingId
+          });
+        } catch (error) {
+          logger.error('Failed to increment driver rides', {
+            error: error.message,
+            driverId: booking.driverId._id
+          });
+        }
+      }
+
+      logger.info('Trip completed', { bookingId: booking.bookingId });
+    }
+  } else if (status === BOOKING_STATUS.CANCELLED) {
+    if (!booking.cancellation) {
+      const cleanReason = reason && typeof reason === 'string'
+        ? reason.trim().substring(0, 200)
+        : `Cancelled by ${req.user.role}`;
+
+      booking.cancellation = {
+        cancelledBy: req.user.role,
+        cancelledAt: now,
+        reason: cleanReason,
+        charge: 0 // Admin/Driver cancellations typically don't charge user
+      };
+
+      logger.info('Booking cancelled', {
+        bookingId: booking.bookingId,
+        cancelledBy: req.user.role,
+        reason: cleanReason
+      });
+    }
   }
 
+  // Update status
   booking.status = status;
   await booking.save();
 
-  // ... (notification logic) ...
+  logger.info('Booking status updated', {
+    bookingId: booking.bookingId,
+    from: currentStatus,
+    to: status,
+    updatedBy: req.user.role
+  });
 
-  return sendSuccess(res, { bookingId: booking.bookingId, status: booking.status }, 'Status updated', 200);
+  // Send notifications
+  const user = booking.userId;
+  if (user) {
+    const statusMessages = {
+      [BOOKING_STATUS.ASSIGNED]: 'A driver has been assigned to your booking',
+      [BOOKING_STATUS.IN_PROGRESS]: 'Your trip has started',
+      [BOOKING_STATUS.COMPLETED]: 'Your trip has been completed. Please rate your experience',
+      [BOOKING_STATUS.CANCELLED]: 'Your booking has been cancelled'
+    };
+
+    const message = statusMessages[status] || `Booking status updated to ${status}`;
+
+    await notifyUser(user, booking.bookingId, status.toLowerCase(), message);
+  }
+
+  const driver = booking.driverId;
+  if (driver && status === BOOKING_STATUS.CANCELLED) {
+    await notifyDriver(
+      driver,
+      'Booking Cancelled',
+      `Booking ${booking.bookingId} has been cancelled`
+    );
+  }
+
+  return sendSuccess(
+    res,
+    {
+      bookingId: booking.bookingId,
+      status: booking.status,
+      previousStatus: currentStatus,
+      updatedAt: booking.updatedAt,
+      trip: booking.trip
+    },
+    'Booking status updated successfully',
+    200
+  );
 });
 
+// ========================================
+// APPLY DISCOUNT
+// ========================================
+
+/**
+ * @desc    Apply discount code to booking
+ * @route   POST /api/bookings/:id/discount
+ * @access  Private
+ */
+export const applyDiscount = catchAsync(async (req, res) => {
+  const { discountCode } = req.body;
+  const bookingId = req.params.id;
+
+  // Validate discount code
+  if (!discountCode || typeof discountCode !== 'string') {
+    throw new BadRequestError('Discount code is required');
+  }
+
+  const cleanCode = discountCode.trim().toUpperCase();
+
+  if (cleanCode.length < 3 || cleanCode.length > 20) {
+    throw new BadRequestError('Invalid discount code format');
+  }
+
+  // Validate ObjectId format
+  if (!bookingId.match(/^[0-9a-fA-F]{24}$/)) {
+    throw new BadRequestError('Invalid booking ID format');
+  }
+
+  const booking = await Booking.findOne({
+    _id: bookingId,
+    userId: req.user._id
+  }).populate('paymentId');
+
+  if (!booking) {
+    throw new NotFoundError('Booking not found');
+  }
+
+  // Validate booking status
+  if (booking.status === BOOKING_STATUS.CANCELLED || booking.status === BOOKING_STATUS.COMPLETED) {
+    throw new BadRequestError(
+      `Cannot apply discount to ${booking.status.toLowerCase()} booking`
+    );
+  }
+
+  // Check if discount already applied
+  if (booking.fareDetails?.discountCode) {
+    throw new ConflictError(
+      `Discount code "${booking.fareDetails.discountCode}" is already applied to this booking`
+    );
+  }
+
+  // Validate discount code and calculate discount
+  // TODO: Implement proper discount service/database lookup
+  let discountAmount = 0;
+  let discountType = 'FIXED';
+
+  if (cleanCode === 'FIRST100') {
+    discountAmount = 100;
+  } else if (cleanCode === 'FLAT50') {
+    discountAmount = 50;
+  } else if (cleanCode === 'SAVE200') {
+    discountAmount = 200;
+  } else {
+    throw new BadRequestError('Invalid or expired discount code');
+  }
+
+  // Ensure discount doesn't exceed fare amount
+  const maxDiscount = Math.floor(booking.fareDetails.finalAmount * 0.5); // Max 50% discount
+
+  if (discountAmount > maxDiscount) {
+    discountAmount = maxDiscount;
+  }
+
+  // Update fare details
+  const oldFinalAmount = booking.fareDetails.finalAmount;
+
+  booking.fareDetails.discountCode = cleanCode;
+  booking.fareDetails.discountAmount = discountAmount;
+  booking.fareDetails.discountType = discountType;
+  booking.fareDetails.finalAmount = Math.max(0, oldFinalAmount - discountAmount);
+
+  await booking.save();
+
+  // Update payment document if exists
+  if (booking.paymentId) {
+    const payment = booking.paymentId;
+
+    if (payment.status === PAYMENT_STATUS.PENDING) {
+      payment.amount = booking.fareDetails.finalAmount;
+      await payment.save();
+
+      logger.info('Payment amount updated after discount', {
+        bookingId: booking.bookingId,
+        oldAmount: oldFinalAmount,
+        newAmount: booking.fareDetails.finalAmount
+      });
+    }
+  }
+
+  logger.info('Discount applied to booking', {
+    bookingId: booking.bookingId,
+    discountCode: cleanCode,
+    discountAmount,
+    oldAmount: oldFinalAmount,
+    newAmount: booking.fareDetails.finalAmount
+  });
+
+  return sendSuccess(
+    res,
+    {
+      bookingId: booking.bookingId,
+      discountCode: cleanCode,
+      discountAmount,
+      fareDetails: booking.fareDetails
+    },
+    'Discount applied successfully',
+    200
+  );
+});
+
+// ========================================
+// GET UPCOMING BOOKINGS (DEPRECATED)
+// ========================================
+
+/**
+ * @desc    Get upcoming bookings (Deprecated - use /api/user/me/bookings/upcoming)
+ * @route   GET /api/bookings/upcoming
+ * @access  Private
+ */
+export const getUpcomingBookings = catchAsync(async (req, res) => {
+  logger.warn('Deprecated endpoint accessed', {
+    endpoint: '/api/bookings/upcoming',
+    userId: req.user._id
+  });
+
+  req.query.status = `${BOOKING_STATUS.CONFIRMED},${BOOKING_STATUS.ASSIGNED}`;
+  req.query.fromDate = new Date().toISOString();
+  req.query.sortBy = 'startDateTime';
+
+  return getAllBookings(req, res);
+});
+
+// ========================================
+// GET BOOKING HISTORY (DEPRECATED)
+// ========================================
+
+/**
+ * @desc    Get booking history (Deprecated - use /api/user/me/bookings/past)
+ * @route   GET /api/bookings/history
+ * @access  Private
+ */
+export const getBookingHistory = catchAsync(async (req, res) => {
+  logger.warn('Deprecated endpoint accessed', {
+    endpoint: '/api/bookings/history',
+    userId: req.user._id
+  });
+
+  req.query.status = `${BOOKING_STATUS.COMPLETED},${BOOKING_STATUS.CANCELLED}`;
+  req.query.sortBy = '-startDateTime';
+
+  return getAllBookings(req, res);
+});
+
+// ========================================
+// GET BOOKING STATS (DEPRECATED)
+// ========================================
+
+/**
+ * @desc    Get booking statistics (Deprecated - use /api/user/me/stats)
+ * @route   GET /api/bookings/stats
+ * @access  Private
+ */
+export const getBookingStats = catchAsync(async (req, res) => {
+  logger.warn('Deprecated endpoint accessed', {
+    endpoint: '/api/bookings/stats',
+    userId: req.user._id
+  });
+
+  return sendSuccess(
+    res,
+    {
+      message: 'This endpoint is deprecated. Please use /api/user/me/stats for user statistics'
+    },
+    'Endpoint deprecated',
+    200
+  );
+});
+
+// ========================================
+// GET CONFIRMED BOOKINGS (ADMIN)
+// ========================================
+
+/**
+ * @desc    Get all confirmed bookings (Admin only)
+ * @route   GET /api/bookings/admin/confirmed
+ * @access  Admin
+ */
+export const getConfirmedBookings = catchAsync(async (req, res) => {
+  // Authorization check
+  if (req.user.role !== 'ADMIN') {
+    throw new AuthorizationError('Access denied. Admin only');
+  }
+
+  const { page, limit, skip } = parsePagination(req.query);
+  const { sortBy = '-startDateTime', fromDate, toDate } = req.query;
+
+  const query = {
+    status: BOOKING_STATUS.CONFIRMED
+  };
+
+  // Filter by date range
+  if (fromDate) {
+    const fromDateObj = new Date(fromDate);
+    if (!isNaN(fromDateObj.getTime())) {
+      query.startDateTime = { $gte: fromDateObj };
+    }
+  }
+
+  if (toDate) {
+    const toDateObj = new Date(toDate);
+    if (!isNaN(toDateObj.getTime())) {
+      query.startDateTime = { ...query.startDateTime, $lte: toDateObj };
+    }
+  }
+
+  const total = await Booking.countDocuments(query);
+
+  const bookings = await Booking.find(query)
+    .sort(sortBy)
+    .skip(skip)
+    .limit(limit)
+    .populate('userId', 'name phoneNumber email')
+    .populate('driverId', 'name phoneNumber')
+    .populate('vehicleId', 'modelName licensePlate type')
+    .populate('paymentId', 'status method amount')
+    .select('-metadata -__v')
+    .lean();
+
+  logger.info('Admin retrieved confirmed bookings', {
+    adminId: req.user._id,
+    page,
+    limit,
+    total
+  });
+
+  return sendPaginatedResponse(
+    res,
+    bookings,
+    page,
+    limit,
+    total,
+    'Confirmed bookings retrieved successfully'
+  );
+});
+
+// ========================================
+// GET ALL BOOKINGS (ADMIN)
+// ========================================
+
+/**
+ * @desc    Get all bookings with filters (Admin only)
+ * @route   GET /api/bookings/admin/all
+ * @access  Admin
+ */
+export const getAllBookingsAdmin = catchAsync(async (req, res) => {
+  // Authorization check
+  if (req.user.role !== 'ADMIN') {
+    throw new AuthorizationError('Access denied. Admin only');
+  }
+
+  const { page, limit, skip } = parsePagination(req.query);
+  const {
+    status,
+    bookingType,
+    vehicleType,
+    fromDate,
+    toDate,
+    userId,
+    driverId,
+    sortBy = '-createdAt',
+    search
+  } = req.query;
+
+  const query = {};
+
+  // Filter by status
+  if (status) {
+    const statuses = status
+      .split(',')
+      .map(s => s.trim().toUpperCase())
+      .filter(s => Object.values(BOOKING_STATUS).includes(s));
+
+    if (statuses.length > 0) {
+      query.status = { $in: statuses };
+    }
+  }
+
+  // Filter by booking type
+  if (bookingType && Object.values(BOOKING_TYPES).includes(bookingType.toUpperCase())) {
+    query.bookingType = bookingType.toUpperCase();
+  }
+
+  // Filter by vehicle type
+  if (vehicleType && Object.values(VEHICLE_TYPES).includes(vehicleType.toUpperCase())) {
+    query.vehicleType = vehicleType.toUpperCase();
+  }
+
+  // Filter by date range
+  if (fromDate) {
+    const fromDateObj = new Date(fromDate);
+    if (!isNaN(fromDateObj.getTime())) {
+      query.startDateTime = { $gte: fromDateObj };
+    }
+  }
+
+  if (toDate) {
+    const toDateObj = new Date(toDate);
+    if (!isNaN(toDateObj.getTime())) {
+      query.startDateTime = { ...query.startDateTime, $lte: toDateObj };
+    }
+  }
+
+  // Filter by user ID
+  if (userId && userId.match(/^[0-9a-fA-F]{24}$/)) {
+    query.userId = userId;
+  }
+
+  // Filter by driver ID
+  if (driverId && driverId.match(/^[0-9a-fA-F]{24}$/)) {
+    query.driverId = driverId;
+  }
+
+  // Search by booking ID or passenger name
+  if (search && typeof search === 'string') {
+    const searchTerm = search.trim();
+    query.$or = [
+      { bookingId: { $regex: searchTerm, $options: 'i' } },
+      { 'passengerDetails.name': { $regex: searchTerm, $options: 'i' } },
+      { 'passengerDetails.phone': { $regex: searchTerm, $options: 'i' } }
+    ];
+  }
+
+  const total = await Booking.countDocuments(query);
+
+  const bookings = await Booking.find(query)
+    .sort(sortBy)
+    .skip(skip)
+    .limit(limit)
+    .populate('userId', 'name phoneNumber email profilePicture')
+    .populate('driverId', 'name phoneNumber rating')
+    .populate('vehicleId', 'modelName licensePlate type')
+    .populate('paymentId', 'status method amount razorpayPaymentId')
+    .lean();
+
+  logger.info('Admin retrieved all bookings', {
+    adminId: req.user._id,
+    page,
+    limit,
+    total,
+    filters: { status, bookingType, vehicleType }
+  });
+
+  return sendPaginatedResponse(
+    res,
+    bookings,
+    page,
+    limit,
+    total,
+    'All bookings retrieved successfully'
+  );
+});
+
+// ========================================
+// GET BOOKING STATISTICS (ADMIN)
+// ========================================
+
+/**
+ * @desc    Get booking statistics (Admin only)
+ * @route   GET /api/bookings/admin/statistics
+ * @access  Admin
+ */
+export const getBookingStatistics = catchAsync(async (req, res) => {
+  // Authorization check
+  if (req.user.role !== 'ADMIN') {
+    throw new AuthorizationError('Access denied. Admin only');
+  }
+
+  const { fromDate, toDate } = req.query;
+
+  const query = {};
+
+  // Filter by date range
+  if (fromDate) {
+    const fromDateObj = new Date(fromDate);
+    if (!isNaN(fromDateObj.getTime())) {
+      query.createdAt = { $gte: fromDateObj };
+    }
+  }
+
+  if (toDate) {
+    const toDateObj = new Date(toDate);
+    if (!isNaN(toDateObj.getTime())) {
+      query.createdAt = { ...query.createdAt, $lte: toDateObj };
+    }
+  }
+
+  // Get counts by status
+  const statusCounts = await Booking.aggregate([
+    { $match: query },
+    { $group: { _id: '$status', count: { $sum: 1 } } }
+  ]);
+
+  // Get counts by booking type
+  const typeCounts = await Booking.aggregate([
+    { $match: query },
+    { $group: { _id: '$bookingType', count: { $sum: 1 } } }
+  ]);
+
+  // Get counts by vehicle type
+  const vehicleCounts = await Booking.aggregate([
+    { $match: query },
+    { $group: { _id: '$vehicleType', count: { $sum: 1 } } }
+  ]);
+
+  // Get revenue statistics
+  const revenueStats = await Booking.aggregate([
+    {
+      $match: {
+        ...query,
+        status: { $in: [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CONFIRMED] }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: '$fareDetails.finalAmount' },
+        averageRevenue: { $avg: '$fareDetails.finalAmount' },
+        totalBookings: { $sum: 1 }
+      }
+    }
+  ]);
+
+  // Get top customers
+  const topCustomers = await Booking.aggregate([
+    { $match: query },
+    {
+      $group: {
+        _id: '$userId',
+        bookingCount: { $sum: 1 },
+        totalSpent: { $sum: '$fareDetails.finalAmount' }
+      }
+    },
+    { $sort: { bookingCount: -1 } },
+    { $limit: 10 },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'userDetails'
+      }
+    },
+    { $unwind: '$userDetails' },
+    {
+      $project: {
+        userId: '$_id',
+        name: '$userDetails.name',
+        phoneNumber: '$userDetails.phoneNumber',
+        bookingCount: 1,
+        totalSpent: 1
+      }
+    }
+  ]);
+
+  logger.info('Admin retrieved booking statistics', {
+    adminId: req.user._id,
+    dateRange: { fromDate, toDate }
+  });
+
+  return sendSuccess(
+    res,
+    {
+      dateRange: {
+        from: fromDate || 'all time',
+        to: toDate || 'now'
+      },
+      statusBreakdown: statusCounts,
+      typeBreakdown: typeCounts,
+      vehicleBreakdown: vehicleCounts,
+      revenue: revenueStats[0] || { totalRevenue: 0, averageRevenue: 0, totalBookings: 0 },
+      topCustomers
+    },
+    'Booking statistics retrieved successfully',
+    200
+  );
+});
 
 // ========================================
 // EXPORTS
 // ========================================
 
 export default {
+  // Public endpoints
   searchCabs,
-  createBooking, // <-- CORRECTED NAME
-  verifyBookingPayment, // <-- NEW
+  getApplicableTypes,
+  getFareEstimate,
+
+  // User endpoints
+  createBooking,
+  verifyBookingPayment,
   getBooking,
   getBookingByCode,
   getAllBookings,
   cancelBooking,
+  addRating,
+  applyDiscount,
+  getCancellationCharges,
+
+  // Deprecated endpoints
   getUpcomingBookings,
   getBookingHistory,
   getBookingStats,
-  addRating,
-  applyDiscount,
-  getFareEstimate,
-  getCancellationCharges,
-  updateBookingStatus
-};
 
+  // Admin/Driver endpoints
+  updateBookingStatus,
+  getConfirmedBookings,
+  getAllBookingsAdmin,
+  getBookingStatistics
+};
