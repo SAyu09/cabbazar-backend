@@ -1,4 +1,7 @@
 // src/config/constants.js - Complete Application Constants (with 4 Local Packages)
+
+import Razorpay from "razorpay";
+
 // Environment
 export const ENV = {
   DEVELOPMENT: 'development',
@@ -73,6 +76,7 @@ export const PAYMENT_STATUS = {
 };
 // Payment Methods
 export const PAYMENT_METHODS = {
+  RAZORPAY: 'RAZORPAY',
   CASH: 'CASH',
   UPI: 'UPI',
   CARD: 'CARD',

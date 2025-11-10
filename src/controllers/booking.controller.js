@@ -1,4 +1,4 @@
-// src/controllers/booking.controller.js - UPDATED to handle includeTolls flag
+// src/controllers/booking.controller.js - UPDATED with Multi-City Support
 import { Booking, User, Vehicle } from '../models/index.js';
 import Driver from '../models/Driver.js';
 import Payment from '../models/Payment.js';
@@ -82,6 +82,7 @@ const LOCAL_RENTAL_MAX_DISTANCE = 80;
 const AIRPORT_MAX_DISTANCE = 200;
 const OUTSTATION_MIN_DISTANCE = 50;
 const SHORT_DISTANCE_THRESHOLD = 50;
+const MAX_VIA_CITIES = 5; // Maximum intermediate stops allowed
 
 // ========================================
 // VALIDATION UTILITIES
@@ -112,6 +113,53 @@ const validateLocation = (location, fieldName = 'location') => {
   }
 
   return true;
+};
+
+/**
+ * Validate via cities array
+ */
+const validateViaCities = (viaCities) => {
+  if (!viaCities) {
+    return [];
+  }
+
+  if (!Array.isArray(viaCities)) {
+    throw new BadRequestError('viaCities must be an array');
+  }
+
+  if (viaCities.length > MAX_VIA_CITIES) {
+    throw new BadRequestError(`Maximum ${MAX_VIA_CITIES} intermediate cities allowed`);
+  }
+
+  // Validate each via city
+  const validatedCities = [];
+  for (let i = 0; i < viaCities.length; i++) {
+    const city = viaCities[i];
+
+    if (!city || typeof city !== 'string' || city.trim().length === 0) {
+      throw new BadRequestError(`Via city at index ${i} is invalid. Must be a non-empty string`);
+    }
+
+    const trimmedCity = city.trim();
+
+    if (trimmedCity.length < 2) {
+      throw new BadRequestError(`Via city at index ${i} is too short (minimum 2 characters)`);
+    }
+
+    if (trimmedCity.length > 100) {
+      throw new BadRequestError(`Via city at index ${i} is too long (maximum 100 characters)`);
+    }
+
+    validatedCities.push(trimmedCity);
+  }
+
+  // Check for duplicate cities
+  const uniqueCities = [...new Set(validatedCities.map(c => c.toLowerCase()))];
+  if (uniqueCities.length !== validatedCities.length) {
+    throw new BadRequestError('Duplicate via cities are not allowed');
+  }
+
+  return validatedCities;
 };
 
 /**
@@ -289,73 +337,95 @@ const getAirportFixedDistance = (pickup, drop) => {
 };
 
 /**
- * Auto-detect booking type based on locations and distance
+ * Calculate multi-city route distance
  */
-const autoDetectBookingType = (from, to, distance) => {
-  const pickupIsAirport = isAirportLocation(from);
-  const dropIsAirport = isAirportLocation(to);
+const calculateMultiCityDistance = async (from, viaCities, to) => {
+  if (!geoService.isAvailable()) {
+    throw new ServiceUnavailableError('Location service is temporarily unavailable');
+  }
 
-  // Case 1: Airport Transfer
-  if (pickupIsAirport || dropIsAirport) {
-    if (distance && distance <= AIRPORT_MAX_DISTANCE) {
-      return pickupIsAirport ? BOOKING_TYPES.AIRPORT_PICKUP : BOOKING_TYPES.AIRPORT_DROP;
+  const route = [from, ...viaCities, to];
+  let totalDistance = 0;
+  let totalDuration = 0;
+  const legs = [];
+
+  logger.info('Calculating multi-city route', {
+    from,
+    via: viaCities,
+    to,
+    totalStops: route.length
+  });
+
+  // Calculate distance for each leg
+  for (let i = 0; i < route.length - 1; i++) {
+    const origin = route[i];
+    const destination = route[i + 1];
+
+    try {
+      // Check fixed distance first
+      const fixedDistance = getAirportFixedDistance(origin, destination);
+
+      if (fixedDistance) {
+        totalDistance += fixedDistance;
+        legs.push({
+          from: origin,
+          to: destination,
+          distance: fixedDistance,
+          duration: null,
+          source: 'airport_fixed_table'
+        });
+
+        logger.info('Using fixed distance for leg', {
+          leg: i + 1,
+          from: origin,
+          to: destination,
+          distance: fixedDistance
+        });
+      } else {
+        // Geocode and calculate distance
+        const originCoords = await geoService.geocode(origin);
+        const destinationCoords = await geoService.geocode(destination);
+        const matrix = await geoService.getDistanceMatrix(originCoords, destinationCoords);
+
+        totalDistance += matrix.distance;
+        totalDuration += matrix.duration;
+
+        legs.push({
+          from: origin,
+          to: destination,
+          distance: matrix.distance,
+          duration: matrix.duration,
+          source: 'google_distance_matrix',
+          originCoords,
+          destinationCoords
+        });
+
+        logger.info('Calculated distance for leg', {
+          leg: i + 1,
+          from: origin,
+          to: destination,
+          distance: matrix.distance,
+          duration: matrix.duration
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to calculate leg distance', {
+        leg: i + 1,
+        from: origin,
+        to: destination,
+        error: error.message
+      });
+      throw new ServiceUnavailableError(
+        `Unable to calculate distance between ${origin} and ${destination}. Please check locations.`
+      );
     }
-    return BOOKING_TYPES.ONE_WAY;
   }
-
-  // Case 2: Local Rental (same city or short distance)
-  if (distance && distance <= LOCAL_RENTAL_MAX_DISTANCE) {
-    return BOOKING_TYPES.LOCAL_8_80;
-  }
-
-  // Case 3: Outstation
-  if (distance && distance >= OUTSTATION_MIN_DISTANCE) {
-    return BOOKING_TYPES.ONE_WAY;
-  }
-
-  return BOOKING_TYPES.ONE_WAY;
-};
-
-/**
- * Get all applicable booking types for a route
- */
-const getApplicableBookingTypes = (from, to, distance) => {
-  const types = [];
-  const pickupIsAirport = isAirportLocation(from);
-  const dropIsAirport = isAirportLocation(to);
-
-  // Airport transfers (if distance <= 200km)
-  if ((pickupIsAirport || dropIsAirport) && distance <= AIRPORT_MAX_DISTANCE) {
-    if (pickupIsAirport) types.push(BOOKING_TYPES.AIRPORT_PICKUP);
-    if (dropIsAirport) types.push(BOOKING_TYPES.AIRPORT_DROP);
-  }
-
-  // Local packages (if distance <= 80km and no airport)
-  if (distance <= LOCAL_RENTAL_MAX_DISTANCE && !pickupIsAirport && !dropIsAirport) {
-    types.push(BOOKING_TYPES.LOCAL_2_20);
-    types.push(BOOKING_TYPES.LOCAL_4_40);
-    types.push(BOOKING_TYPES.LOCAL_8_80);
-    types.push(BOOKING_TYPES.LOCAL_12_120);
-  }
-
-  // Outstation (always available)
-  types.push(BOOKING_TYPES.ONE_WAY);
-  types.push(BOOKING_TYPES.ROUND_TRIP);
-
-  return types;
-};
-
-/**
- * Build clean location object
- */
-const buildLocationObject = (locationData) => {
-  validateLocation(locationData);
 
   return {
-    city: locationData.city.trim(),
-    address: locationData.address?.trim() || undefined,
-    lat: locationData.lat || undefined,
-    lng: locationData.lng || undefined,
+    totalDistance: Math.round(totalDistance * 10) / 10,
+    totalDuration: totalDuration > 0 ? Math.round(totalDuration) : null,
+    legs,
+    route
   };
 };
 
@@ -399,6 +469,89 @@ const calculateDistance = async (from, to) => {
       'Unable to calculate distance. Please check your locations and try again.'
     );
   }
+};
+
+/**
+ * Auto-detect booking type based on locations and distance
+ */
+const autoDetectBookingType = (from, to, distance, hasViaCities = false) => {
+  const pickupIsAirport = isAirportLocation(from);
+  const dropIsAirport = isAirportLocation(to);
+
+  // Multi-city routes are always ONE_WAY (or can offer ROUND_TRIP)
+  if (hasViaCities) {
+    return BOOKING_TYPES.ONE_WAY;
+  }
+
+  // Case 1: Airport Transfer
+  if (pickupIsAirport || dropIsAirport) {
+    if (distance && distance <= AIRPORT_MAX_DISTANCE) {
+      return pickupIsAirport ? BOOKING_TYPES.AIRPORT_PICKUP : BOOKING_TYPES.AIRPORT_DROP;
+    }
+    return BOOKING_TYPES.ONE_WAY;
+  }
+
+  // Case 2: Local Rental (same city or short distance)
+  if (distance && distance <= LOCAL_RENTAL_MAX_DISTANCE) {
+    return BOOKING_TYPES.LOCAL_8_80;
+  }
+
+  // Case 3: Outstation
+  if (distance && distance >= OUTSTATION_MIN_DISTANCE) {
+    return BOOKING_TYPES.ONE_WAY;
+  }
+
+  return BOOKING_TYPES.ONE_WAY;
+};
+
+/**
+ * Get all applicable booking types for a route
+ */
+const getApplicableBookingTypes = (from, to, distance, hasViaCities = false) => {
+  const types = [];
+  const pickupIsAirport = isAirportLocation(from);
+  const dropIsAirport = isAirportLocation(to);
+
+  // Multi-city routes: only outstation types
+  if (hasViaCities) {
+    types.push(BOOKING_TYPES.ONE_WAY);
+    types.push(BOOKING_TYPES.ROUND_TRIP);
+    return types;
+  }
+
+  // Airport transfers (if distance <= 200km)
+  if ((pickupIsAirport || dropIsAirport) && distance <= AIRPORT_MAX_DISTANCE) {
+    if (pickupIsAirport) types.push(BOOKING_TYPES.AIRPORT_PICKUP);
+    if (dropIsAirport) types.push(BOOKING_TYPES.AIRPORT_DROP);
+  }
+
+  // Local packages (if distance <= 80km and no airport)
+  if (distance <= LOCAL_RENTAL_MAX_DISTANCE && !pickupIsAirport && !dropIsAirport) {
+    types.push(BOOKING_TYPES.LOCAL_2_20);
+    types.push(BOOKING_TYPES.LOCAL_4_40);
+    types.push(BOOKING_TYPES.LOCAL_8_80);
+    types.push(BOOKING_TYPES.LOCAL_12_120);
+  }
+
+  // Outstation (always available)
+  types.push(BOOKING_TYPES.ONE_WAY);
+  types.push(BOOKING_TYPES.ROUND_TRIP);
+
+  return types;
+};
+
+/**
+ * Build clean location object
+ */
+const buildLocationObject = (locationData) => {
+  validateLocation(locationData);
+
+  return {
+    city: locationData.city.trim(),
+    address: locationData.address?.trim() || undefined,
+    lat: locationData.lat || undefined,
+    lng: locationData.lng || undefined,
+  };
 };
 
 /**
@@ -465,7 +618,7 @@ const notifyAdmin = async (title, message, metadata = {}) => {
 // ========================================
 
 /**
- * @desc    Smart Search for available cabs with auto-detection
+ * @desc    Smart Search for available cabs with auto-detection and multi-city support
  * @route   POST /api/bookings/search
  * @access  Public
  */
@@ -473,13 +626,14 @@ export const searchCabs = catchAsync(async (req, res) => {
   const {
     from,
     to,
-    date, // This is the start date
+    via,
+    viaCities,
+    date,
     type,
     startDateTime,
-    endDateTime, // This is the return date
+    endDateTime,
     includeTolls
   } = req.body;
-  // --- [END MODIFIED] ---
 
   // Validation
   if (!from || typeof from !== 'string' || from.trim().length === 0) {
@@ -490,8 +644,25 @@ export const searchCabs = catchAsync(async (req, res) => {
     throw new BadRequestError('Drop-off location (to) is required');
   }
 
-  // --- [MODIFIED] ---
-  // Use 'date' or 'startDateTime' for tripDate
+  // Check if from and to are the same
+  // if (from.toLowerCase().trim() === to.toLowerCase().trim()) {
+  //   throw new BadRequestError('Pickup and drop-off locations cannot be the same. For local trips, select a local package.');
+  // }
+
+  // Validate via cities (support both 'via' and 'viaCities' for backward compatibility)
+  const viaArray = via || viaCities || [];
+  const validatedViaCities = validateViaCities(viaArray);
+  const hasViaCities = validatedViaCities.length > 0;
+
+  // Check for duplicate cities in entire route
+  const allCities = [from, ...validatedViaCities, to].map(c => c.toLowerCase().trim());
+  const uniqueAllCities = [...new Set(allCities)];
+
+  // if (uniqueAllCities.length !== allCities.length) {
+  //   throw new BadRequestError('Duplicate cities found in route. Each city must be unique.');
+  // }
+
+  // Validate date/time
   const tripDate = validateDateTime(date || startDateTime || Date.now());
   const tripEndDate = endDateTime ? new Date(endDateTime) : null;
 
@@ -501,58 +672,141 @@ export const searchCabs = catchAsync(async (req, res) => {
   if (tripEndDate && tripEndDate < tripDate) {
     throw new BadRequestError('Return date (endDateTime) must be after start date');
   }
-  // --- [END MODIFIED] ---
 
-  // Calculate distance
-  const distanceResult = await calculateDistance(from, to);
-  const { distance, duration, source, originCoords, destinationCoords } = distanceResult;
-
-  // Auto-detect or validate booking type
+  // Check if user explicitly requested a local rental type
   const isLocalRequest = type && LOCAL_RENTAL_TYPES.includes(type);
 
-  if (!isLocalRequest && (!distance || distance <= 0)) {
-    throw new BadRequestError('Could not determine a valid distance for this route');
+  // Local rentals cannot have via cities
+  if (isLocalRequest && hasViaCities) {
+    throw new BadRequestError('Local rental packages do not support intermediate stops (via cities)');
   }
 
-  const detectedType = autoDetectBookingType(from, to, distance || 0);
+  // Initialize distance variables
+  let distance = null;
+  let duration = null;
+  let source = null;
+  let originCoords = null;
+  let destinationCoords = null;
+  let routeLegs = null;
+  let fullRoute = null;
+
+  // Calculate distance based on route type
+  if (!isLocalRequest) {
+    try {
+      if (hasViaCities) {
+        // Multi-city route calculation
+        const multiCityResult = await calculateMultiCityDistance(
+          from,
+          validatedViaCities,
+          to
+        );
+
+        distance = multiCityResult.totalDistance;
+        duration = multiCityResult.totalDuration;
+        routeLegs = multiCityResult.legs;
+        fullRoute = multiCityResult.route;
+        source = 'multi_city_route';
+
+        // Get first and last coordinates
+        if (routeLegs.length > 0) {
+          originCoords = routeLegs[0].originCoords || null;
+          destinationCoords = routeLegs[routeLegs.length - 1].destinationCoords || null;
+        }
+
+        logger.info('Multi-city route calculated', {
+          from,
+          via: validatedViaCities,
+          to,
+          totalDistance: distance,
+          legs: routeLegs.length
+        });
+
+      } else {
+        // Simple two-point route
+        const distanceResult = await calculateDistance(from, to);
+        distance = distanceResult.distance;
+        duration = distanceResult.duration;
+        source = distanceResult.source;
+        originCoords = distanceResult.originCoords;
+        destinationCoords = distanceResult.destinationCoords;
+      }
+    } catch (error) {
+      // If distance calculation fails, check if user wants local rental
+      logger.warn('Distance calculation failed', {
+        from,
+        to,
+        via: validatedViaCities,
+        error: error.message
+      });
+
+      // If locations are same/similar or calculation fails, suggest local rental
+      if (from.toLowerCase().trim() === to.toLowerCase().trim()) {
+        logger.info('Same pickup and drop location detected, treating as local rental');
+        distance = 0; // Set to 0 for local rentals
+      } else {
+        // Re-throw error if it's truly a distance calculation issue
+        throw error;
+      }
+    }
+  } else {
+    // For local rentals, set distance to 0
+    distance = 0;
+    source = 'local_rental';
+    logger.info('Local rental requested, skipping distance calculation', {
+      from,
+      to,
+      type
+    });
+  }
+
+  // Auto-detect or validate booking type
+  const detectedType = isLocalRequest
+    ? type
+    : autoDetectBookingType(from, to, distance || 0, hasViaCities);
+
   let bookingType = type || detectedType;
   const typeAutoDetected = !type;
   let typeChangedWarning = null;
 
   // Get applicable types
-  const applicableTypes = getApplicableBookingTypes(from, to, distance || 0);
+  const applicableTypes = getApplicableBookingTypes(
+    from,
+    to,
+    distance || 0,
+    hasViaCities
+  );
 
   // Validate user-provided type
-  if (type) {
+  if (type && !isLocalRequest) {
     validateBookingType(type);
 
     if (!applicableTypes.includes(type)) {
       logger.warn('User selected type not applicable, auto-correcting', {
         selectedType: type,
         detectedType,
-        distance
+        distance,
+        hasViaCities
       });
 
       bookingType = detectedType;
       typeChangedWarning = {
-        message: `${type} is not available for this route (distance: ${(distance || 0).toFixed(1)} km). Showing ${detectedType} options instead.`,
+        message: hasViaCities
+          ? `${type} is not available for multi-city routes. Showing ${detectedType} options instead.`
+          : `${type} is not available for this route (distance: ${(distance || 0).toFixed(1)} km). Showing ${detectedType} options instead.`,
         originalType: type,
         correctedType: detectedType,
-        reason: 'TYPE_NOT_APPLICABLE_FOR_DISTANCE',
+        reason: hasViaCities ? 'MULTI_CITY_ROUTE' : 'TYPE_NOT_APPLICABLE_FOR_DISTANCE',
         availableTypes: applicableTypes
       };
     }
   }
 
-  // --- [NEW] ---
   // Ensure endDateTime is null if not a round trip
   const finalEndDateTime = (bookingType === BOOKING_TYPES.ROUND_TRIP) ? tripEndDate : null;
-  // --- [END NEW] ---
 
   // Get vehicle options & pricing
   const isLocalBooking = LOCAL_RENTAL_TYPES.includes(bookingType);
 
-  // --- [MODIFIED] ---
   // Pass endDateTime AND includeTolls to pricing service
   const vehicleOptions = pricingService.getVehicleOptions(bookingType, {
     distance: isLocalBooking ? 0 : (distance || 0),
@@ -560,41 +814,53 @@ export const searchCabs = catchAsync(async (req, res) => {
     endDateTime: finalEndDateTime,
     includeTolls: includeTolls || false
   });
-  
 
   // Build response
   const searchResults = {
     searchId: generateBookingReference(),
     from,
     to,
+    via: hasViaCities ? validatedViaCities : null,
+    hasViaCities,
+    viaCitiesCount: validatedViaCities.length,
+    fullRoute: hasViaCities ? fullRoute : [from, to],
     fromCoordinates: originCoords || null,
     toCoordinates: destinationCoords || null,
     date: tripDate,
-    endDateTime: finalEndDateTime, // --- [NEW] Add to response ---
+    endDateTime: finalEndDateTime,
     distance: isLocalBooking ? null : distance,
     durationMinutes: duration || null,
     distanceSource: source,
+    routeLegs: hasViaCities ? routeLegs : null,
     bookingType,
     detectedType,
     typeAutoDetected,
     applicableTypes,
     warning: typeChangedWarning,
     isAirportRoute: isAirportLocation(from) || isAirportLocation(to),
-    isLocalRoute: (distance || 0) <= LOCAL_RENTAL_MAX_DISTANCE,
+    isLocalRoute: (distance || 0) <= LOCAL_RENTAL_MAX_DISTANCE || isLocalBooking,
     isOutstationRoute: (distance || 0) >= OUTSTATION_MIN_DISTANCE,
+    isMultiCity: hasViaCities,
     options: vehicleOptions,
     validUntil: addHours(new Date(), 1),
     timestamp: new Date(),
+    routeInfo: hasViaCities ? {
+      totalStops: fullRoute.length,
+      intermediateStops: validatedViaCities.length,
+      estimatedTotalDuration: duration ? `${Math.round(duration / 60)} hours ${duration % 60} minutes` : null
+    } : null
   };
 
   logger.info('Smart search completed', {
     searchId: searchResults.searchId,
     from,
     to,
+    via: validatedViaCities,
     distance,
     bookingType,
-    includeTolls: includeTolls || false, // --- [ADDED] ---
+    includeTolls: includeTolls || false,
     typeAutoDetected,
+    hasViaCities,
     optionsCount: vehicleOptions.length
   });
 
@@ -665,11 +931,10 @@ export const createBooking = catchAsync(async (req, res) => {
     notes,
     searchId,
     distance, // This is the one-way distance from search
-    paymentMethod = PAYMENT_METHODS.UPI,
+    paymentMethod = PAYMENT_METHODS.RAZORPAY,
     addOnCodes,
     includeTolls // --- [ADDED] ---
   } = req.body;
-  // --- [END MODIFIED] ---
 
   // 1. Validate booking type
   validateBookingType(bookingType);
@@ -779,7 +1044,7 @@ export const createBooking = catchAsync(async (req, res) => {
     throw new BadRequestError('Calculated fare is zero or negative. Cannot proceed');
   }
 
-  const amountInPaise = Math.round(finalAmount * 100);
+  const amountInPaise = 100;
 
   // Build clean locations
   const cleanPickupLocation = buildLocationObject(pickupLocation);
@@ -894,7 +1159,7 @@ export const createBooking = catchAsync(async (req, res) => {
 
   } else {
     // Online payment (Razorpay)
-    payment.method = PAYMENT_METHODS.UPI;
+    payment.method = PAYMENT_METHODS.RAZORPAY;
     const receiptId = `receipt_${booking.bookingId}`;
     const razorpayNotes = {
       bookingDbId: booking._id.toString(),
@@ -917,11 +1182,11 @@ export const createBooking = catchAsync(async (req, res) => {
       {
         razorpayKey: process.env.RAZORPAY_KEY_ID,
         orderId: razorpayOrder.id,
-        amount: razorpayOrder.amount, // This is in PAISE (e.g., 693000)
+        amount: razorpayOrder.amount,
         currency: 'INR',
         bookingId: booking.bookingId,
         bookingDbId: booking._id,
-        fareDetails: booking.fareDetails, // This is in RUPEES (e.g., 6930)
+        fareDetails: booking.fareDetails,
         prefill: {
           name: finalPassengerDetails.name,
           email: finalPassengerDetails.email,
