@@ -1044,8 +1044,7 @@ export const createBooking = catchAsync(async (req, res) => {
     throw new BadRequestError('Calculated fare is zero or negative. Cannot proceed');
   }
 
-  const amountInPaise = 100;
-
+  const amountInPaise = Math.round(finalAmount * 100);
   // Build clean locations
   const cleanPickupLocation = buildLocationObject(pickupLocation);
   const cleanDropLocation = isLocalRental
