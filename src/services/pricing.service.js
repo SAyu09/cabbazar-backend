@@ -646,7 +646,7 @@ class PricingService {
       // Build response
       const fareData = {
         vehicleType: normalizedVehicleType,
-        bookingType: 'AIRPORT_TRANSFER',
+        bookingType: BOOKING_TYPES.AIRPORT_DROP || BOOKING_TYPES.AIRPORT_PICKUP,
         baseFare: Math.round(baseFare),
         basePrice,
         distance: Math.round(validDistance * 10) / 10,
@@ -943,7 +943,7 @@ class PricingService {
       const straightLineDistance = R * c;
 
       // Apply road distance multiplier (roads are not straight lines)
-      const roadMultiplier = 1.4; // 40% longer for actual road distance
+      const roadMultiplier = 1.4;
       const roadDistance = straightLineDistance * roadMultiplier;
 
       const finalDistance = Math.round(roadDistance * 10) / 10;

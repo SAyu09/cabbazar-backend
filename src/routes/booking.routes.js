@@ -203,7 +203,7 @@ router.post('/estimate-fare', estimateFareValidation, bookingController.getFareE
  * @desc    Get all bookings for current user
  * @access  Private
  */
-router.get('/', protect, bookingController.getAllBookings);
+router.get('/getAllBookings', protect, bookingController.getAllBookings);
 
 /**
  * @route   POST /api/bookings
