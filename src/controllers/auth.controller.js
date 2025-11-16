@@ -202,9 +202,11 @@ export const verifyOtp = catchAsync(async (req, res) => {
     await user.save(); // Save lastLogin, token, etc.
 
     // --- [NEW] Add device info (non-blocking) ---
-    if (fcmToken && deviceId) {
-      user.addDevice({ deviceId, fcmToken, deviceType: deviceType || 'unknown' })
-        .catch(err => logger.error('Failed to add device on login', { userId: user._id, error: err.message }));
+    if (fcmToken) {
+      user.fcmToken = fcmToken; // Update FCM token
+      user.save();
+      // user.addDevice({ deviceId, fcmToken, deviceType: deviceType || 'unknown' })
+      //   .catch(err => logger.error('Failed to add device on login', { userId: user._id, error: err.message }));
     }
     // --- [END NEW] ---
 
@@ -337,9 +339,11 @@ export const register = catchAsync(async (req, res) => {
   });
 
   // --- [NEW] Add device info (non-blocking) ---
-  if (fcmToken && deviceId) {
-    user.addDevice({ deviceId, fcmToken, deviceType: deviceType || 'unknown' })
-      .catch(err => logger.error('Failed to add device on register', { userId: user._id, error: err.message }));
+  if (fcmToken) {
+    user.fcmToken = fcmToken; 
+    user.save();
+    // user.addDevice({ deviceId, fcmToken, deviceType: deviceType || 'unknown' })
+    //   .catch(err => logger.error('Failed to add device on register', { userId: user._id, error: err.message }));
   }
   // --- [END NEW] ---
 

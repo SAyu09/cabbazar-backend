@@ -75,10 +75,11 @@ const userSchema = new mongoose.Schema({
   lastLogin: {
     type: Date
   },
+  fcmToken: String,
   deviceInfo: [{
     deviceId: String,
     deviceType: String,
-    fcmToken: String,
+    //fcmToken: String,
     lastUsed: Date
   }]
 }, {
@@ -116,21 +117,22 @@ userSchema.methods.updateLastLogin = function() {
   return this.save({ validateBeforeSave: false });
 };
 
-userSchema.methods.addDevice = function(deviceInfo) {
-  const existingDevice = this.deviceInfo.find(d => d.deviceId === deviceInfo.deviceId);
+// userSchema.methods.addDevice = function(deviceInfo) {
+//   const existingDevice = this.deviceInfo.find(d => d.deviceId === deviceInfo.deviceId);
 
-  if (existingDevice) {
-    existingDevice.lastUsed = new Date();
-    existingDevice.fcmToken = deviceInfo.fcmToken || existingDevice.fcmToken;
-  } else {
-    this.deviceInfo.push({
-      ...deviceInfo,
-      lastUsed: new Date()
-    });
-  }
+//   if (existingDevice) {
+//     existingDevice.lastUsed = new Date();
+//     existingDevice.fcmToken = deviceInfo.fcmToken || existingDevice.fcmToken;
+//   } else {
+//     this.deviceInfo.push({
+//       ...deviceInfo,
+//       lastUsed: new Date()
+//     }
+//   );
+//   }
 
-  return this.save({ validateBeforeSave: false });
-};
+//   return this.save({ validateBeforeSave: false });
+// };
 
 // Static Methods
 userSchema.statics.findByPhoneNumber = function(phoneNumber) {
