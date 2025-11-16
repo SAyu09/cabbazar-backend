@@ -1069,6 +1069,9 @@ export const createBooking = catchAsync(async (req, res) => {
     ? notes.trim().substring(0, 500)
     : null;
 
+
+
+    
   // ========================================
   // 9. CREATE BOOKING & PAYMENT DOCS
   // ========================================
