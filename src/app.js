@@ -5,14 +5,14 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import logger from './config/logger.js';
-import {loggerMiddleware, responseCaptureMiddelware} from './middleware/logger.js';
+import { loggerMiddleware, responseCaptureMiddelware } from './middleware/logger.js';
 import globalErrorHandler from './middleware/error.middleware.js';
 
 // Import routes
 import authRoutes from './routes/auth.routes.js';
 import bookingRoutes from './routes/booking.routes.js';
 import userRoutes from './routes/user.routes.js';
-import paymentRoutes from './routes/payment.route.js'; // --- ADD THIS ---
+import paymentRoutes from './routes/payment.route.js';
 
 // Initialize Express app
 const app = express();
@@ -20,21 +20,21 @@ const app = express();
 // Environment variables
 const isProduction = process.env.NODE_ENV === 'production';
 
-// --- IMPORTANT: Raw body parser for webhooks ---
-// The payment webhook MUST come BEFORE express.json()
-// We will handle this in payment.routes.js itself, so the global express.json() is fine here.
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 app.use(cookieParser());
+
+// --- [FIX] Updated CORS Configuration ---
+// Changing 'origin' to '*' allows your mobile app (and any other domain)
+// to send requests to your server. This should fix the "Network Error".
 app.use(cors({
-  origin: isProduction 
-    ? ['https://your-production-domain.com']
-    : ['http://localhost:3000'],
+  origin: '*', // Allows all origins
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+// --- [END FIX] ---
 
 // Security middleware
 app.use(helmet());
@@ -57,9 +57,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/user', userRoutes);
-app.use('/api/payments', paymentRoutes); // --- ADD THIS ---
-
-// ... (rest of your app.js)
+app.use('/api/payments', paymentRoutes);
 
 // Catch undefined API routes
 app.all('/api/*', (req, res) => {

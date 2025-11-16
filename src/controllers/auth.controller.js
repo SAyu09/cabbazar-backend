@@ -104,11 +104,8 @@ export const sendOtp = catchAsync(async (req, res) => {
   return sendSuccess(res, responseData, 'OTP sent successfully', 200);
 });
 
-/**
- * @desc    Verify OTP and check user status (Login or Register)
- * @route   POST /api/auth/verify-otp
- * @access  Public
- */
+// verifyOtp controller
+
 export const verifyOtp = catchAsync(async (req, res) => {
   const { phoneNumber, otp, fcmToken} = req.body;
   if (!phoneNumber || !otp) {
