@@ -1,19 +1,17 @@
-// src/utils/seedData.js - Updated for Payment Model
+// src/utils/seedData.js - Updated for new Vehicle Types and Pricing
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-// CORRECTED IMPORTS
 import Vehicle from '../models/Vehicle.js';
 import Driver from '../models/Driver.js';
 import User from '../models/User.js';
 import Booking from '../models/Booking.js';
-import Payment from '../models/Payment.js'; // --- ADDED PAYMENT MODEL ---
-// END CORRECTED IMPORTS
+import Payment from '../models/Payment.js';
 import {
   VEHICLE_TYPES,
   BOOKING_TYPES,
   BOOKING_STATUS,
-  PAYMENT_STATUS, // --- ADDED ---
-  PAYMENT_METHODS // --- ADDED ---
+  PAYMENT_STATUS,
+  PAYMENT_METHODS
 } from '../config/constants.js';
 import logger from '../config/logger.js';
 
@@ -34,616 +32,189 @@ const connectDB = async () => {
 };
 
 // ============================================
-// SAMPLE VEHICLE DATA (Unchanged)
+// SAMPLE VEHICLE DATA (NEW)
 // ============================================
 
 const vehicles = [
-  // ========== SEDAN VEHICLES (Economy/Standard) ==========
-  {
-    type: VEHICLE_TYPES.SEDAN,
-    modelName: 'Honda City',
-    licensePlate: 'DL01CD5678',
-    capacity: 4,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation'],
-    year: 2023,
-    color: 'Silver',
-    fuelType: 'PETROL',
-    insurance: {
-      policyNumber: 'POL12345',
-      expiryDate: new Date('2025-12-31'),
-      provider: 'HDFC Ergo'
-    },
-    maintenance: {
-      lastService: new Date('2024-09-01'),
-      nextServiceDue: new Date('2025-03-01'),
-      totalKm: 18000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.SEDAN,
-    modelName: 'Hyundai Verna',
-    licensePlate: 'DL03PQ9012',
-    capacity: 4,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation'],
-    year: 2022,
-    color: 'Black',
-    fuelType: 'DIESEL',
-    insurance: {
-      policyNumber: 'POL12346',
-      expiryDate: new Date('2025-08-15'),
-      provider: 'ICICI Lombard'
-    },
-    maintenance: {
-      lastService: new Date('2024-08-15'),
-      nextServiceDue: new Date('2025-02-15'),
-      totalKm: 30000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.SEDAN,
-    modelName: 'Maruti Ciaz',
-    licensePlate: 'DL05ST3456',
-    capacity: 4,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation'],
-    year: 2023,
-    color: 'White',
-    fuelType: 'PETROL',
-    insurance: {
-      policyNumber: 'POL12347',
-      expiryDate: new Date('2025-10-20'),
-      provider: 'Bajaj Allianz'
-    },
-    maintenance: {
-      lastService: new Date('2024-10-01'),
-      nextServiceDue: new Date('2025-04-01'),
-      totalKm: 15000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.SEDAN,
-    modelName: 'Honda Amaze',
-    licensePlate: 'DL07UV7890',
-    capacity: 4,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation'],
-    year: 2024,
-    color: 'Blue',
-    fuelType: 'DIESEL',
-    insurance: {
-      policyNumber: 'POL12348',
-      expiryDate: new Date('2025-11-30'),
-      provider: 'Tata AIG'
-    },
-    maintenance: {
-      lastService: new Date('2024-09-10'),
-      nextServiceDue: new Date('2025-03-10'),
-      totalKm: 8000
-    }
-  },
-
-  // ========== PREMIUM SEDAN (Prime/Luxury) ==========
-  {
-    type: VEHICLE_TYPES.PREMIUM_SEDAN,
-    modelName: 'Honda Accord',
-    licensePlate: 'DL01GH3456',
-    capacity: 4,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation', 'Premium Interior', 'Leather Seats', 'WiFi', 'Sunroof'],
-    year: 2024,
-    color: 'Pearl White',
-    fuelType: 'PETROL',
-    insurance: {
-      policyNumber: 'POL12349',
-      expiryDate: new Date('2026-01-15'),
-      provider: 'HDFC Ergo'
-    },
-    maintenance: {
-      lastService: new Date('2024-10-15'),
-      nextServiceDue: new Date('2025-04-15'),
-      totalKm: 5000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.PREMIUM_SEDAN,
-    modelName: 'Toyota Camry',
-    licensePlate: 'DL05TU7890',
-    capacity: 4,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation', 'Premium Interior', 'Leather Seats', 'WiFi', 'Sunroof', 'Ambient Lighting'],
-    year: 2024,
-    color: 'Black',
-    fuelType: 'HYBRID',
-    insurance: {
-      policyNumber: 'POL12350',
-      expiryDate: new Date('2026-02-28'),
-      provider: 'ICICI Lombard'
-    },
-    maintenance: {
-      lastService: new Date('2024-10-20'),
-      nextServiceDue: new Date('2025-04-20'),
-      totalKm: 3000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.PREMIUM_SEDAN,
-    modelName: 'Skoda Superb',
-    licensePlate: 'DL02WX1234',
-    capacity: 4,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation', 'Premium Interior', 'Leather Seats', 'WiFi', 'Sunroof', 'Massage Seats'],
-    year: 2023,
-    color: 'Silver',
-    fuelType: 'DIESEL',
-    insurance: {
-      policyNumber: 'POL12351',
-      expiryDate: new Date('2025-12-10'),
-      provider: 'Bajaj Allianz'
-    },
-    maintenance: {
-      lastService: new Date('2024-09-05'),
-      nextServiceDue: new Date('2025-03-05'),
-      totalKm: 12000
-    }
-  },
-
-  // ========== SUV/MUV VEHICLES ==========
-  {
-    type: VEHICLE_TYPES.SUV,
-    modelName: 'Toyota Innova Crysta',
-    licensePlate: 'DL01EF9012',
-    capacity: 6,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation', 'Premium Interior', 'Extra Legroom', 'Spacious Luggage', 'Captain Seats'],
-    year: 2023,
-    color: 'White',
-    fuelType: 'DIESEL',
-    insurance: {
-      policyNumber: 'POL12352',
-      expiryDate: new Date('2025-11-20'),
-      provider: 'HDFC Ergo'
-    },
-    maintenance: {
-      lastService: new Date('2024-08-20'),
-      nextServiceDue: new Date('2025-02-20'),
-      totalKm: 22000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.SUV,
-    modelName: 'Maruti Ertiga',
-    licensePlate: 'DL04RS3456',
-    capacity: 6,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation', 'Premium Interior', 'Extra Legroom'],
-    year: 2022,
-    color: 'Grey',
-    fuelType: 'PETROL',
-    insurance: {
-      policyNumber: 'POL12353',
-      expiryDate: new Date('2025-09-15'),
-      provider: 'ICICI Lombard'
-    },
-    maintenance: {
-      lastService: new Date('2024-07-15'),
-      nextServiceDue: new Date('2025-01-15'),
-      totalKm: 28000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.SUV,
-    modelName: 'Kia Carens',
-    licensePlate: 'DL06YZ5678',
-    capacity: 6,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation', 'Premium Interior', 'Extra Legroom', 'Spacious Luggage', 'Sunroof'],
-    year: 2023,
-    color: 'Red',
-    fuelType: 'DIESEL',
-    insurance: {
-      policyNumber: 'POL12354',
-      expiryDate: new Date('2025-10-30'),
-      provider: 'Tata AIG'
-    },
-    maintenance: {
-      lastService: new Date('2024-09-20'),
-      nextServiceDue: new Date('2025-03-20'),
-      totalKm: 16000
-    }
-  },
-  {
-    type: VEHICLE_TYPES.SUV,
-    modelName: 'Mahindra XUV700',
-    licensePlate: 'DL08AB9012',
-    capacity: 6,
-    isAvailable: true,
-    features: ['AC', 'Music System', 'GPS Navigation', 'Premium Interior', 'Extra Legroom', 'Spacious Luggage', 'Panoramic Sunroof', 'ADAS'],
-    year: 2024,
-    color: 'Blue',
-    fuelType: 'DIESEL',
-    insurance: {
-      policyNumber: 'POL12355',
-      expiryDate: new Date('2026-01-10'),
-      provider: 'Bajaj Allianz'
-    },
-    maintenance: {
-      lastService: new Date('2024-10-05'),
-      nextServiceDue: new Date('2025-04-05'),
-      totalKm: 7000
-    }
-  },
-
-  // ========== HATCHBACK (Budget Option) ==========
+  // ========== HATCHBACK ==========
   {
     type: VEHICLE_TYPES.HATCHBACK,
     modelName: 'Maruti Swift',
-    licensePlate: 'DL01AB1234',
+    licensePlate: 'DL01CA1234',
     capacity: 4,
     isAvailable: true,
     features: ['AC', 'Music System'],
-    year: 2022,
+    year: 2023,
     color: 'White',
-    fuelType: 'PETROL',
-    insurance: {
-      policyNumber: 'POL12356',
-      expiryDate: new Date('2025-08-20'),
-      provider: 'HDFC Ergo'
-    },
-    maintenance: {
-      lastService: new Date('2024-08-01'),
-      nextServiceDue: new Date('2025-02-01'),
-      totalKm: 25000
-    }
+    fuelType: 'PETROL'
   },
   {
     type: VEHICLE_TYPES.HATCHBACK,
     modelName: 'Hyundai i20',
-    licensePlate: 'DL02XY5678',
+    licensePlate: 'DL02CB5678',
     capacity: 4,
     isAvailable: true,
-    features: ['AC', 'Music System'],
-    year: 2023,
+    features: ['AC', 'Music System', 'GPS'],
+    year: 2022,
     color: 'Red',
-    fuelType: 'DIESEL',
-    insurance: {
-      policyNumber: 'POL12357',
-      expiryDate: new Date('2025-09-30'),
-      provider: 'ICICI Lombard'
-    },
-    maintenance: {
-      lastService: new Date('2024-09-01'),
-      nextServiceDue: new Date('2025-03-01'),
-      totalKm: 15000
-    }
-  }
+    fuelType: 'PETROL'
+  },
+  
+  // ========== SEDAN ==========
+  {
+    type: VEHICLE_TYPES.SEDAN,
+    modelName: 'Maruti Ciaz',
+    licensePlate: 'DL03SA9012',
+    capacity: 4,
+    isAvailable: true,
+    features: ['AC', 'Music System', 'GPS Navigation'],
+    year: 2023,
+    color: 'Silver',
+    fuelType: 'PETROL'
+  },
+  {
+    type: VEHICLE_TYPES.SEDAN,
+    modelName: 'Honda City',
+    licensePlate: 'DL04SD3456',
+    capacity: 4,
+    isAvailable: true,
+    features: ['AC', 'Music System', 'GPS Navigation', 'Sunroof'],
+    year: 2024,
+    color: 'Black',
+    fuelType: 'PETROL'
+  },
+
+  // ========== SUV (ERTIGA) ==========
+  {
+    type: VEHICLE_TYPES.SUV_ERTIGA,
+    modelName: 'Maruti Ertiga',
+    licensePlate: 'DL05SE1111',
+    capacity: 6,
+    isAvailable: true,
+    features: ['AC', 'Music System', '6+1 Seating'],
+    year: 2023,
+    color: 'Blue',
+    fuelType: 'DIESEL'
+  },
+
+  // ========== SUV (CARENS) ==========
+  {
+    type: VEHICLE_TYPES.SUV_CARENS,
+    modelName: 'Kia Carens',
+    licensePlate: 'DL06SC2222',
+    capacity: 6,
+    isAvailable: true,
+    features: ['AC', 'Music System', 'Sunroof', '6+1 Seating'],
+    year: 2024,
+    color: 'White',
+    fuelType: 'DIESEL'
+  },
+
+  // ========== SUV (INOVA) ==========
+  {
+    type: VEHICLE_TYPES.SUV_INOVA,
+    modelName: 'Toyota Innova Crysta',
+    licensePlate: 'DL07SI3333',
+    capacity: 6,
+    isAvailable: true,
+    features: ['AC', 'Music System', 'Captain Seats', '6+1 Seating'],
+    year: 2023,
+    color: 'Grey',
+    fuelType: 'DIESEL'
+  },
+  {
+    type: VEHICLE_TYPES.SUV_INOVA_6_1,
+    modelName: 'Toyota Innova (6+1)',
+    licensePlate: 'DL08SI4444',
+    capacity: 6,
+    isAvailable: true,
+    features: ['AC', 'Music System', '6+1 Seating'],
+    year: 2022,
+    color: 'Silver',
+    fuelType: 'DIESEL'
+  },
+  {
+    type: VEHICLE_TYPES.SUV_INOVA_7_1,
+    modelName: 'Toyota Innova (7+1)',
+    licensePlate: 'DL09SI5555',
+    capacity: 7,
+    isAvailable: true,
+    features: ['AC', 'Music System', '7+1 Seating'],
+    year: 2023,
+    color: 'White',
+    fuelType: 'DIESEL'
+  },
+
+  // ========== SUV (INOVA PREMIUM) ==========
+  {
+    type: VEHICLE_TYPES.SUV_INOVA_PREMIUM,
+    modelName: 'Toyota Innova Hycross',
+    licensePlate: 'DL10SP6666',
+    capacity: 6,
+    isAvailable: true,
+    features: ['AC', 'Music System', 'Sunroof', 'Leather Seats', 'Premium'],
+    year: 2024,
+    color: 'Black',
+    fuelType: 'HYBRID'
+  },
+
+  // ========== TRAVELLER ==========
+  {
+    type: VEHICLE_TYPES.TRAVELLER_12_1,
+    modelName: 'Force Traveller (12+1)',
+    licensePlate: 'DL11T7777',
+    capacity: 12,
+    isAvailable: true,
+    features: ['AC', 'Music System', '12+1 Seating'],
+    year: 2023,
+    color: 'White',
+    fuelType: 'DIESEL'
+  },
+  {
+    type: VEHICLE_TYPES.TRAVELLER_17_1,
+    modelName: 'Force Traveller (17+1)',
+    licensePlate: 'DL12T8888',
+    capacity: 17,
+    isAvailable: true,
+    features: ['AC', 'Music System', '17+1 Seating'],
+    year: 2023,
+    color: 'White',
+    fuelType: 'DIESEL'
+  },
+  
+  // ========== TRAVELLER MAHARAJA ==========
+  {
+    type: VEHICLE_TYPES.TRAVELLER_MAHARAJA_12_1,
+    modelName: 'Maharaja Traveller (12+1)',
+    licensePlate: 'DL13M9999',
+    capacity: 12,
+    isAvailable: true,
+    features: ['AC', 'Music System', 'Reclining Seats', 'Premium Interior'],
+    year: 2024,
+    color: 'Silver',
+    fuelType: 'DIESEL'
+  },
 ];
 
 // ============================================
-// SAMPLE DRIVER DATA (Unchanged)
+// SAMPLE DRIVER DATA (Shortened for brevity)
 // ============================================
 
 const drivers = [
-  // Sedan Drivers
-  {
-    name: 'Rajesh Kumar',
-    phoneNumber: '9876543210',
-    email: 'rajesh.kumar@example.com',
-    licenseNumber: 'DL1234567890',
-    licenseExpiry: new Date('2028-12-31'),
-    rating: 4.8,
-    totalRides: 250,
-    completedRides: 245,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Sector 15, Rohini',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110085'
-    },
-    emergencyContact: {
-      name: 'Sunita Kumar',
-      phone: '9876543211',
-      relation: 'Wife'
-    }
-  },
-  {
-    name: 'Amit Singh',
-    phoneNumber: '9876543211',
-    email: 'amit.singh@example.com',
-    licenseNumber: 'DL1234567891',
-    licenseExpiry: new Date('2027-06-30'),
-    rating: 4.9,
-    totalRides: 320,
-    completedRides: 315,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Lajpat Nagar',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110024'
-    },
-    emergencyContact: {
-      name: 'Priya Singh',
-      phone: '9876543212',
-      relation: 'Sister'
-    }
-  },
-  {
-    name: 'Suresh Sharma',
-    phoneNumber: '9876543212',
-    email: 'suresh.sharma@example.com',
-    licenseNumber: 'DL1234567892',
-    licenseExpiry: new Date('2029-03-15'),
-    rating: 4.7,
-    totalRides: 180,
-    completedRides: 175,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Karol Bagh',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110005'
-    },
-    emergencyContact: {
-      name: 'Rakesh Sharma',
-      phone: '9876543213',
-      relation: 'Brother'
-    }
-  },
-  {
-    name: 'Manoj Tiwari',
-    phoneNumber: '9876543213',
-    email: 'manoj.tiwari@example.com',
-    licenseNumber: 'DL1234567893',
-    licenseExpiry: new Date('2028-02-14'),
-    rating: 4.9,
-    totalRides: 350,
-    completedRides: 345,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Janakpuri',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110058'
-    },
-    emergencyContact: {
-      name: 'Pooja Tiwari',
-      phone: '9876543214',
-      relation: 'Wife'
-    }
-  },
-
-  // Premium Sedan Drivers (Higher ratings)
-  {
-    name: 'Vijay Verma',
-    phoneNumber: '9876543214',
-    email: 'vijay.verma@example.com',
-    licenseNumber: 'DL1234567894',
-    licenseExpiry: new Date('2028-09-20'),
-    rating: 5.0,
-    totalRides: 400,
-    completedRides: 398,
-    cancelledRides: 2,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Vasant Vihar',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110057'
-    },
-    emergencyContact: {
-      name: 'Anjali Verma',
-      phone: '9876543215',
-      relation: 'Wife'
-    }
-  },
-  {
-    name: 'Anil Gupta',
-    phoneNumber: '9876543215',
-    email: 'anil.gupta@example.com',
-    licenseNumber: 'DL1234567895',
-    licenseExpiry: new Date('2029-05-25'),
-    rating: 4.9,
-    totalRides: 380,
-    completedRides: 375,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Defence Colony',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110024'
-    },
-    emergencyContact: {
-      name: 'Neha Gupta',
-      phone: '9876543216',
-      relation: 'Sister'
-    }
-  },
-  {
-    name: 'Rakesh Malhotra',
-    phoneNumber: '9876543216',
-    email: 'rakesh.malhotra@example.com',
-    licenseNumber: 'DL1234567896',
-    licenseExpiry: new Date('2028-11-10'),
-    rating: 4.8,
-    totalRides: 290,
-    completedRides: 285,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Greater Kailash',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110048'
-    },
-    emergencyContact: {
-      name: 'Meera Malhotra',
-      phone: '9876543217',
-      relation: 'Wife'
-    }
-  },
-
-  // SUV Drivers
-  {
-    name: 'Ramesh Yadav',
-    phoneNumber: '9876543217',
-    email: 'ramesh.yadav@example.com',
-    licenseNumber: 'DL1234567897',
-    licenseExpiry: new Date('2027-11-10'),
-    rating: 4.6,
-    totalRides: 150,
-    completedRides: 145,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Dwarka Sector 10',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110075'
-    },
-    emergencyContact: {
-      name: 'Seema Yadav',
-      phone: '9876543218',
-      relation: 'Wife'
-    }
-  },
-  {
-    name: 'Deepak Chauhan',
-    phoneNumber: '9876543218',
-    email: 'deepak.chauhan@example.com',
-    licenseNumber: 'DL1234567898',
-    licenseExpiry: new Date('2027-08-30'),
-    rating: 4.7,
-    totalRides: 200,
-    completedRides: 195,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Pitampura',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110034'
-    },
-    emergencyContact: {
-      name: 'Ravi Chauhan',
-      phone: '9876543219',
-      relation: 'Brother'
-    }
-  },
-  {
-    name: 'Sanjay Mishra',
-    phoneNumber: '9876543219',
-    email: 'sanjay.mishra@example.com',
-    licenseNumber: 'DL1234567899',
-    licenseExpiry: new Date('2028-04-15'),
-    rating: 4.8,
-    totalRides: 220,
-    completedRides: 215,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Uttam Nagar',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110059'
-    },
-    emergencyContact: {
-      name: 'Kavita Mishra',
-      phone: '9876543220',
-      relation: 'Wife'
-    }
-  },
-  {
-    name: 'Prakash Joshi',
-    phoneNumber: '9876543220',
-    email: 'prakash.joshi@example.com',
-    licenseNumber: 'DL1234567900',
-    licenseExpiry: new Date('2029-01-20'),
-    rating: 4.9,
-    totalRides: 260,
-    completedRides: 255,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Mayur Vihar',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110091'
-    },
-    emergencyContact: {
-      name: 'Asha Joshi',
-      phone: '9876543221',
-      relation: 'Wife'
-    }
-  },
-
-  // Hatchback Drivers
-  {
-    name: 'Ashok Pandey',
-    phoneNumber: '9876543221',
-    email: 'ashok.pandey@example.com',
-    licenseNumber: 'DL1234567901',
-    licenseExpiry: new Date('2027-07-10'),
-    rating: 4.5,
-    totalRides: 180,
-    completedRides: 175,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Shahdara',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110032'
-    },
-    emergencyContact: {
-      name: 'Radha Pandey',
-      phone: '9876543222',
-      relation: 'Wife'
-    }
-  },
-  {
-    name: 'Mukesh Sharma',
-    phoneNumber: '9876543222',
-    email: 'mukesh.sharma@example.com',
-    licenseNumber: 'DL1234567902',
-    licenseExpiry: new Date('2028-03-25'),
-    rating: 4.6,
-    totalRides: 210,
-    completedRides: 205,
-    cancelledRides: 5,
-    isAvailable: true,
-    isVerified: true,
-    address: {
-      street: 'Tilak Nagar',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110018'
-    },
-    emergencyContact: {
-      name: 'Shalini Sharma',
-      phone: '9876543223',
-      relation: 'Wife'
-    }
-  }
+  // Drivers for new vehicles
+  { name: 'Rajesh Kumar', phoneNumber: '9876543210', licenseNumber: 'DL1234567890', licenseExpiry: new Date('2028-12-31'), rating: 4.8, isAvailable: true, isVerified: true },
+  { name: 'Amit Singh', phoneNumber: '9876543211', licenseNumber: 'DL1234567891', licenseExpiry: new Date('2027-06-30'), rating: 4.9, isAvailable: true, isVerified: true },
+  { name: 'Suresh Sharma', phoneNumber: '9876543212', licenseNumber: 'DL1234567892', licenseExpiry: new Date('2029-03-15'), rating: 4.7, isAvailable: true, isVerified: true },
+  { name: 'Manoj Tiwari', phoneNumber: '9876543213', licenseNumber: 'DL1234567893', licenseExpiry: new Date('2028-02-14'), rating: 4.9, isAvailable: true, isVerified: true },
+  { name: 'Vijay Verma', phoneNumber: '9876543214', licenseNumber: 'DL1234567894', licenseExpiry: new Date('2028-09-20'), rating: 5.0, isAvailable: true, isVerified: true },
+  { name: 'Anil Gupta', phoneNumber: '9876543215', licenseNumber: 'DL1234567895', licenseExpiry: new Date('2029-05-25'), rating: 4.9, isAvailable: true, isVerified: true },
+  { name: 'Rakesh Malhotra', phoneNumber: '9876543216', licenseNumber: 'DL1234567896', licenseExpiry: new Date('2028-11-10'), rating: 4.8, isAvailable: true, isVerified: true },
+  { name: 'Ramesh Yadav', phoneNumber: '9876543217', licenseNumber: 'DL1234567897', licenseExpiry: new Date('2027-11-10'), rating: 4.6, isAvailable: true, isVerified: true },
+  { name: 'Deepak Chauhan', phoneNumber: '9876543218', licenseNumber: 'DL1234567898', licenseExpiry: new Date('2027-08-30'), rating: 4.7, isAvailable: true, isVerified: true },
+  { name: 'Sanjay Mishra', phoneNumber: '9876543219', licenseNumber: 'DL1234567899', licenseExpiry: new Date('2028-04-15'), rating: 4.8, isAvailable: true, isVerified: true },
+  { name: 'Prakash Joshi', phoneNumber: '9876543220', licenseNumber: 'DL1234567900', licenseExpiry: new Date('2029-01-20'), rating: 4.9, isAvailable: true, isVerified: true },
+  { name: 'Ashok Pandey', phoneNumber: '9876543221', licenseNumber: 'DL1234567901', licenseExpiry: new Date('2027-07-10'), rating: 4.5, isAvailable: true, isVerified: true },
+  { name: 'Mukesh Sharma', phoneNumber: '9876543222', licenseNumber: 'DL1234567902', licenseExpiry: new Date('2028-03-25'), rating: 4.6, isAvailable: true, isVerified: true }
 ];
 
 // ============================================
@@ -651,42 +222,9 @@ const drivers = [
 // ============================================
 
 const sampleUsers = [
-  {
-    phoneNumber: '9999999991',
-    name: 'Test User 1',
-    email: 'testuser1@example.com',
-    isVerified: true,
-    isActive: true,
-    role: 'CUSTOMER',
-    address: {
-      street: 'Connaught Place',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110001'
-    }
-  },
-  {
-    phoneNumber: '9999999992',
-    name: 'Test User 2',
-    email: 'testuser2@example.com',
-    isVerified: true,
-    isActive: true,
-    role: 'CUSTOMER',
-    address: {
-      street: 'Nehru Place',
-      city: 'Delhi',
-      state: 'Delhi',
-      pincode: '110019'
-    }
-  },
-  {
-    phoneNumber: '9999999993',
-    name: 'Test User 3',
-    email: 'testuser3@example.com',
-    isVerified: true,
-    isActive: true,
-    role: 'CUSTOMER'
-  }
+  { phoneNumber: '9999999991', name: 'Test User 1', email: 'testuser1@example.com', isVerified: true, isActive: true, role: 'CUSTOMER', address: { street: 'Connaught Place', city: 'Delhi', state: 'Delhi', pincode: '110001' } },
+  { phoneNumber: '9999999992', name: 'Test User 2', email: 'testuser2@example.com', isVerified: true, isActive: true, role: 'CUSTOMER', address: { street: 'Nehru Place', city: 'Delhi', state: 'Delhi', pincode: '110019' } },
+  { phoneNumber: '9999999993', name: 'Test User 3', email: 'testuser3@example.com', isVerified: true, isActive: true, role: 'CUSTOMER' }
 ];
 
 // ============================================
@@ -698,7 +236,7 @@ const sampleUsers = [
  */
 const clearData = async () => {
   try {
-    await Payment.deleteMany({}); // --- ADDED ---
+    await Payment.deleteMany({});
     await Vehicle.deleteMany({});
     await Driver.deleteMany({});
     await User.deleteMany({});
@@ -786,24 +324,26 @@ const seedBookings = async (users, vehicles, drivers) => {
     };
     
     // --- 1. Upcoming Sedan Booking (Paid Online) ---
-    const { vehicleId: sedanVid, driverId: sedanDid } = getVehicleAndDriver('SEDAN');
+    // Delhi to Agra, 230km, ONE_WAY, SEDAN. Rate: 15/km.
+    // Fare = 230 * 15 = 3450. GST = 173. Final = 3623.
+    const { vehicleId: sedanVid, driverId: sedanDid } = getVehicleAndDriver(VEHICLE_TYPES.SEDAN);
     const booking1 = new Booking({
       userId: users[0]._id,
       bookingType: BOOKING_TYPES.ONE_WAY,
       pickupLocation: { city: 'Delhi', address: 'Connaught Place, New Delhi', lat: 28.6330, lng: 77.2197 },
       dropLocation: { city: 'Agra', address: 'Taj Mahal, Agra', lat: 27.1751, lng: 78.0421 },
       startDateTime: new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000), // 2 days from now
-      vehicleType: 'SEDAN',
+      vehicleType: VEHICLE_TYPES.SEDAN,
       vehicleId: sedanVid,
       driverId: sedanDid,
       passengerDetails: { name: users[0].name, phone: users[0].phoneNumber, email: users[0].email },
-      fareDetails: { baseFare: 2530, distance: 230, gst: 127, totalFare: 2530, finalAmount: 2657, perKmRate: 11 },
+      fareDetails: { baseFare: 3450, distance: 230, gst: 173, totalFare: 3450, finalAmount: 3623, perKmRate: 15 },
       status: BOOKING_STATUS.CONFIRMED,
     });
     const payment1 = new Payment({
       userId: users[0]._id,
       bookingId: booking1._id,
-      amount: 2657,
+      amount: 3623,
       status: PAYMENT_STATUS.COMPLETED,
       method: PAYMENT_METHODS.CARD,
       razorpayPaymentId: 'pay_seed_1a2b3c'
@@ -812,19 +352,21 @@ const seedBookings = async (users, vehicles, drivers) => {
     bookingsToCreate.push(booking1);
     paymentsToCreate.push(payment1);
 
-    // --- 2. Completed Premium Sedan Booking (Paid Online) ---
-    const { vehicleId: pSedanVid, driverId: pSedanDid } = getVehicleAndDriver('PREMIUM_SEDAN');
+    // --- 2. Completed Premium SUV Booking (Paid Online) ---
+    // Airport Drop, 20km, SUV_INOVA_PREMIUM. Base: 1199. Free: 10km. Extra: 10km @ 32/km = 320.
+    // Fare = 1199 + 320 = 1519. GST = 76. Final = 1595.
+    const { vehicleId: pSedanVid, driverId: pSedanDid } = getVehicleAndDriver(VEHICLE_TYPES.SUV_INOVA_PREMIUM);
     const booking2 = new Booking({
       userId: users[0]._id,
       bookingType: BOOKING_TYPES.AIRPORT_DROP,
       pickupLocation: { city: 'Delhi', address: 'Vasant Vihar, New Delhi', lat: 28.5602, lng: 77.1648 },
       dropLocation: { city: 'Delhi', address: 'Indira Gandhi International Airport, Terminal 3', lat: 28.5562, lng: 77.1000 },
       startDateTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
-      vehicleType: 'PREMIUM_SEDAN',
+      vehicleType: VEHICLE_TYPES.SUV_INOVA_PREMIUM,
       vehicleId: pSedanVid,
       driverId: pSedanDid,
       passengerDetails: { name: users[0].name, phone: users[0].phoneNumber },
-      fareDetails: { baseFare: 1600, distance: 20, gst: 80, totalFare: 1600, finalAmount: 1680, perKmRate: 22 },
+      fareDetails: { baseFare: 1519, distance: 20, gst: 76, totalFare: 1519, finalAmount: 1595, perKmRate: 32 },
       status: BOOKING_STATUS.COMPLETED,
       trip: {
         actualStartTime: new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000),
@@ -835,7 +377,7 @@ const seedBookings = async (users, vehicles, drivers) => {
     const payment2 = new Payment({
       userId: users[0]._id,
       bookingId: booking2._id,
-      amount: 1680,
+      amount: 1595,
       status: PAYMENT_STATUS.COMPLETED,
       method: PAYMENT_METHODS.UPI,
       razorpayPaymentId: 'pay_seed_4d5e6f'
@@ -844,26 +386,27 @@ const seedBookings = async (users, vehicles, drivers) => {
     bookingsToCreate.push(booking2);
     paymentsToCreate.push(payment2);
 
-    // --- 3. Upcoming SUV Local Rental (Cash) ---
-    const { vehicleId: suvVid, driverId: suvDid } = getVehicleAndDriver('SUV');
+    // --- 3. Upcoming SUV Ertiga Local Rental (Cash) ---
+    // LOCAL_8_80, SUV_ERTIGA. Base: 1899. GST = 95. Final = 1994.
+    const { vehicleId: suvVid, driverId: suvDid } = getVehicleAndDriver(VEHICLE_TYPES.SUV_ERTIGA);
     const booking3 = new Booking({
       userId: users[1]._id,
       bookingType: BOOKING_TYPES.LOCAL_8_80,
       pickupLocation: { city: 'Delhi', address: 'India Gate, New Delhi', lat: 28.6129, lng: 77.2295 },
       dropLocation: { city: 'Delhi', address: 'India Gate, New Delhi', lat: 28.6129, lng: 77.2295 },
       startDateTime: new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000), // 3 days from now
-      vehicleType: 'SUV',
+      vehicleType: VEHICLE_TYPES.SUV_ERTIGA,
       vehicleId: suvVid,
       driverId: suvDid,
       passengerDetails: { name: users[1].name, phone: users[1].phoneNumber, email: users[1].email },
-      fareDetails: { baseFare: 2800, distance: 80, duration: 8, gst: 140, totalFare: 2800, finalAmount: 2940 },
+      fareDetails: { baseFare: 1899, distance: 80, duration: 8, gst: 95, totalFare: 1899, finalAmount: 1994 },
       status: BOOKING_STATUS.CONFIRMED,
       specialRequests: ['Child seat required', 'AC must be working'],
     });
     const payment3 = new Payment({
       userId: users[1]._id,
       bookingId: booking3._id,
-      amount: 2940,
+      amount: 1994,
       status: PAYMENT_STATUS.PENDING,
       method: PAYMENT_METHODS.CASH,
     });
@@ -872,7 +415,9 @@ const seedBookings = async (users, vehicles, drivers) => {
     paymentsToCreate.push(payment3);
 
     // --- 4. Completed Sedan Round Trip (Paid Online) ---
-    const { vehicleId: sedan2Vid, driverId: sedan2Did } = getVehicleAndDriver('SEDAN');
+    // Delhi to Jaipur, 280km one-way -> 560km round-trip. SEDAN. Rate: 11/km.
+    // Fare = 560 * 11 = 6160. GST = 308. Final = 6468.
+    const { vehicleId: sedan2Vid, driverId: sedan2Did } = getVehicleAndDriver(VEHICLE_TYPES.SEDAN);
     const booking4 = new Booking({
       userId: users[1]._id,
       bookingType: BOOKING_TYPES.ROUND_TRIP,
@@ -880,23 +425,23 @@ const seedBookings = async (users, vehicles, drivers) => {
       dropLocation: { city: 'Jaipur', address: 'Hawa Mahal, Jaipur', lat: 26.9239, lng: 75.8267 },
       startDateTime: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000), // 10 days ago
       endDateTime: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000),
-      vehicleType: 'SEDAN',
+      vehicleType: VEHICLE_TYPES.SEDAN,
       vehicleId: sedan2Vid,
       driverId: sedan2Did,
       passengerDetails: { name: users[1].name, phone: users[1].phoneNumber },
-      fareDetails: { baseFare: 5520, distance: 560, gst: 276, totalFare: 5520, finalAmount: 5796, perKmRate: 9.85 },
+      fareDetails: { baseFare: 6160, distance: 560, gst: 308, totalFare: 6160, finalAmount: 6468, perKmRate: 11 },
       status: BOOKING_STATUS.COMPLETED,
       trip: {
         actualStartTime: new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000),
         actualEndTime: new Date(now.getTime() - 9 * 24 * 60 * 60 * 1000),
         actualDistance: 565, startOdometer: 18000, endOdometer: 18565
       },
-      rating: { value: 5, comment: 'Excellent service, very professional driver' }
+      rating: { value: 5, comment: 'Excellent service, new pricing is great' }
     });
     const payment4 = new Payment({
       userId: users[1]._id,
       bookingId: booking4._id,
-      amount: 5796,
+      amount: 6468,
       status: PAYMENT_STATUS.COMPLETED,
       method: PAYMENT_METHODS.NET_BANKING,
       razorpayPaymentId: 'pay_seed_7g8h9i'
@@ -906,18 +451,20 @@ const seedBookings = async (users, vehicles, drivers) => {
     paymentsToCreate.push(payment4);
 
     // --- 5. Cancelled Hatchback Booking (Was Pending Payment) ---
-    const { vehicleId: hatchVid, driverId: hatchDid } = getVehicleAndDriver('HATCHBACK');
+    // Delhi to Gurgaon, 35km, ONE_WAY, HATCHBACK. Rate: 14/km.
+    // Fare = 35 * 14 = 490. GST = 25. Final = 515.
+    const { vehicleId: hatchVid, driverId: hatchDid } = getVehicleAndDriver(VEHICLE_TYPES.HATCHBACK);
     const booking5 = new Booking({
       userId: users[2]._id,
       bookingType: BOOKING_TYPES.ONE_WAY,
       pickupLocation: { city: 'Delhi', address: 'Karol Bagh, New Delhi', lat: 28.647, lng: 77.195 },
       dropLocation: { city: 'Gurgaon', address: 'Cyber City, Gurgaon', lat: 28.494, lng: 77.088 },
       startDateTime: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000),
-      vehicleType: 'HATCHBACK',
+      vehicleType: VEHICLE_TYPES.HATCHBACK,
       vehicleId: hatchVid,
       passengerDetails: { name: users[2].name, phone: users[2].phoneNumber },
-      fareDetails: { baseFare: 350, distance: 35, gst: 18, totalFare: 350, finalAmount: 368, perKmRate: 10 },
-      status: BOOKING_STATUS.CANCELLED, // Booking is cancelled
+      fareDetails: { baseFare: 490, distance: 35, gst: 25, totalFare: 490, finalAmount: 515, perKmRate: 14 },
+      status: BOOKING_STATUS.CANCELLED,
       cancellation: {
         cancelledBy: 'USER',
         cancelledAt: new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
@@ -928,8 +475,8 @@ const seedBookings = async (users, vehicles, drivers) => {
     const payment5 = new Payment({
       userId: users[2]._id,
       bookingId: booking5._id,
-      amount: 368,
-      status: PAYMENT_STATUS.FAILED, // Payment failed as it was never completed
+      amount: 515,
+      status: PAYMENT_STATUS.FAILED,
       method: PAYMENT_METHODS.UPI,
       failureReason: 'Booking cancelled by user before payment'
     });
@@ -937,44 +484,12 @@ const seedBookings = async (users, vehicles, drivers) => {
     bookingsToCreate.push(booking5);
     paymentsToCreate.push(payment5);
 
-    // --- 6. In-Progress Premium Sedan Booking (Cash) ---
-    const { vehicleId: pSedan2Vid, driverId: pSedan2Did } = getVehicleAndDriver('PREMIUM_SEDAN');
-    const booking6 = new Booking({
-      userId: users[0]._id,
-      bookingType: BOOKING_TYPES.AIRPORT_PICKUP,
-      pickupLocation: { city: 'Delhi', address: 'Indira Gandhi International Airport, T3', lat: 28.5562, lng: 77.1000 },
-      dropLocation: { city: 'Delhi', address: 'The Leela Palace, Chanakyapuri', lat: 28.5968, lng: 77.1895 },
-      startDateTime: new Date(now.getTime() - 30 * 60 * 1000), // 30 minutes ago
-      vehicleType: 'PREMIUM_SEDAN',
-      vehicleId: pSedan2Vid,
-      driverId: pSedan2Did,
-      passengerDetails: { name: users[0].name, phone: users[0].phoneNumber, email: users[0].email },
-      fareDetails: { baseFare: 1650, distance: 18, gst: 83, totalFare: 1650, finalAmount: 1733, perKmRate: 22 },
-      status: BOOKING_STATUS.IN_PROGRESS,
-      trip: {
-        actualStartTime: new Date(now.getTime() - 25 * 60 * 1000),
-        startOdometer: 3000
-      }
-    });
-    const payment6 = new Payment({
-      userId: users[0]._id,
-      bookingId: booking6._id,
-      amount: 1733,
-      status: PAYMENT_STATUS.PENDING,
-      method: PAYMENT_METHODS.CASH,
-    });
-    booking6.paymentId = payment6._id;
-    bookingsToCreate.push(booking6);
-    paymentsToCreate.push(payment6);
-
-
     // --- Bulk insert all created documents ---
     await Payment.insertMany(paymentsToCreate);
     await Booking.insertMany(bookingsToCreate);
     
     logger.info(`✅ ${bookingsToCreate.length} sample bookings and payments seeded`);
 
-    // Log booking summary
     const statusSummary = bookingsToCreate.reduce((acc, b) => {
       acc[b.status] = (acc[b.status] || 0) + 1;
       return acc;
@@ -995,7 +510,7 @@ const seedBookings = async (users, vehicles, drivers) => {
 
 const seedDatabase = async () => {
   try {
-    logger.info('🌱 Starting database seeding...\n');
+    logger.info('🌱 Starting database seeding with NEW pricing...\n');
 
     await connectDB();
 
@@ -1003,7 +518,7 @@ const seedDatabase = async () => {
     await clearData();
 
     // Seed in order (with dependencies)
-    logger.info('\n📦 Seeding vehicles...');
+    logger.info('\n📦 Seeding new vehicles...');
     const vehicles = await seedVehicles();
 
     logger.info('\n👨‍✈️ Seeding drivers...');
@@ -1012,7 +527,7 @@ const seedDatabase = async () => {
     logger.info('\n👤 Seeding users...');
     const users = await seedUsers();
 
-    logger.info('\n📋 Seeding sample bookings & payments...');
+    logger.info('\n📋 Seeding sample bookings & payments (with new fares)...');
     const bookings = await seedBookings(users, vehicles, drivers);
 
     // ========================================
@@ -1025,14 +540,10 @@ const seedDatabase = async () => {
 
     logger.info('\n📊 SUMMARY:');
     logger.info(`   ├─ Vehicles: ${vehicles.length}`);
-    logger.info(`   │  ├─ Hatchback: ${vehicles.filter(v => v.type === 'HATCHBACK').length}`);
-    logger.info(`   │  ├─ Sedan: ${vehicles.filter(v => v.type === 'SEDAN').length}`);
-    logger.info(`   │  ├─ Premium Sedan: ${vehicles.filter(v => v.type === 'PREMIUM_SEDAN').length}`);
-    logger.info(`   │  └─ SUV: ${vehicles.filter(v => v.type === 'SUV').length}`);
     logger.info(`   ├─ Drivers: ${drivers.length}`);
     logger.info(`   ├─ Users: ${users.length}`);
     logger.info(`   ├─ Bookings: ${bookings.length}`);
-    logger.info(`   └─ Payments: ${bookings.length}\n`); // Added Payments count
+    logger.info(`   └─ Payments: ${bookings.length}\n`);
 
     logger.info('🔐 TEST USER CREDENTIALS:');
     logger.info('━'.repeat(60));
@@ -1095,7 +606,7 @@ const seedByType = async (type) => {
         break;
       case 'bookings':
         await Booking.deleteMany({});
-        await Payment.deleteMany({}); // --- ADDED ---
+        await Payment.deleteMany({});
         const u = await User.find({});
         const v = await Vehicle.find({});
         const d = await Driver.find({});

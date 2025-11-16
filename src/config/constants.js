@@ -1,4 +1,4 @@
-// src/config/constants.js - Complete Application Constants (with 4 Local Packages)
+// src/config/constants.js - Complete Application Constants (NEW PRICING)
 
 import Razorpay from "razorpay";
 
@@ -83,69 +83,167 @@ export const PAYMENT_METHODS = {
   WALLET: 'WALLET',
   NET_BANKING: 'NET_BANKING'
 };
-// Pricing Configuration
+
+// --- [NEW] Vehicle Types ---
+export const VEHICLE_TYPES = {
+  HATCHBACK: 'HATCHBACK',
+  SEDAN: 'SEDAN',
+  SUV_ERTIGA: 'SUV_ERTIGA',
+  SUV_CARENS: 'SUV_CARENS',
+  SUV_INOVA: 'SUV_INOVA',
+  SUV_INOVA_6_1: 'SUV_INOVA_6_1',
+  SUV_INOVA_7_1: 'SUV_INOVA_7_1',
+  SUV_INOVA_PREMIUM: 'SUV_INOVA_PREMIUM',
+  TRAVELLER_12_1: 'TRAVELLER_12_1',
+  TRAVELLER_17_1: 'TRAVELLER_17_1',
+  TRAVELLER_20_1: 'TRAVELLER_20_1',
+  TRAVELLER_26_1: 'TRAVELLER_26_1',
+  TRAVELLER_MAHARAJA_12_1: 'TRAVELLER_MAHARAJA_12_1',
+  TRAVELLER_MAHARAJA_15_1: 'TRAVELLER_MAHARAJA_15_1'
+};
+
+// --- [NEW] Pricing Configuration ---
 export const PRICING = {
   HATCHBACK: {
-    perKmRate: 12,
+    perKmRateOneWay: 14,
+    perKmRateRoundTrip: 10,
     minFare: 300,
     nightChargeMultiplier: 1.2
   },
   SEDAN: {
-    perKmRate: 14,
+    perKmRateOneWay: 15,
+    perKmRateRoundTrip: 11,
     minFare: 350,
     nightChargeMultiplier: 1.2
   },
-  SUV: {
-    perKmRate: 18,
+  SUV_ERTIGA: {
+    perKmRateOneWay: 18,
+    perKmRateRoundTrip: 13,
     minFare: 450,
     nightChargeMultiplier: 1.2
   },
-  PREMIUM_SEDAN: {
-    perKmRate: 22,
+  SUV_CARENS: {
+    perKmRateOneWay: 16,
+    perKmRateRoundTrip: 16, // Assuming same if not specified
+    minFare: 450,
+    nightChargeMultiplier: 1.2
+  },
+  SUV_INOVA: {
+    perKmRateOneWay: 20,
+    perKmRateRoundTrip: 17,
+    minFare: 500,
+    nightChargeMultiplier: 1.2
+  },
+  SUV_INOVA_6_1: {
+    perKmRateOneWay: 18,
+    perKmRateRoundTrip: 18, // Assuming same
+    minFare: 500,
+    nightChargeMultiplier: 1.2
+  },
+  SUV_INOVA_7_1: {
+    perKmRateOneWay: 19,
+    perKmRateRoundTrip: 19, // Assuming same
     minFare: 550,
+    nightChargeMultiplier: 1.2
+  },
+  SUV_INOVA_PREMIUM: {
+    perKmRateOneWay: 32,
+    perKmRateRoundTrip: 32, // Assuming same
+    minFare: 700,
+    nightChargeMultiplier: 1.2
+  },
+  TRAVELLER_12_1: {
+    perKmRateOneWay: 25,
+    perKmRateRoundTrip: 25, // Assuming same
+    minFare: 1000,
+    nightChargeMultiplier: 1.2
+  },
+  TRAVELLER_17_1: {
+    perKmRateOneWay: 27,
+    perKmRateRoundTrip: 27, // Assuming same
+    minFare: 1200,
+    nightChargeMultiplier: 1.2
+  },
+  TRAVELLER_20_1: {
+    perKmRateOneWay: 30,
+    perKmRateRoundTrip: 30, // Assuming same
+    minFare: 1400,
+    nightChargeMultiplier: 1.2
+  },
+  TRAVELLER_26_1: {
+    perKmRateOneWay: 35,
+    perKmRateRoundTrip: 35, // Assuming same
+    minFare: 1800,
+    nightChargeMultiplier: 1.2
+  },
+  TRAVELLER_MAHARAJA_12_1: {
+    perKmRateOneWay: 28,
+    perKmRateRoundTrip: 28, // Assuming same
+    minFare: 1300,
+    nightChargeMultiplier: 1.2
+  },
+  TRAVELLER_MAHARAJA_15_1: {
+    perKmRateOneWay: 32,
+    perKmRateRoundTrip: 32, // Assuming same
+    minFare: 1500,
     nightChargeMultiplier: 1.2
   }
 };
-// Local Package Configuration (UPDATED with 4 packages)
+
+// --- [UPDATED] Local Package Configuration ---
+// Keys are lowercase to match pricing.service.js logic
+// Prices are estimated, only extraKmCharge is updated from new rates
 export const LOCAL_PACKAGES = {
   '2_20': {
     hours: 2,
     km: 20,
     hatchback: 599,
     sedan: 699,
-    suv: 899,
-    premium_sedan: 1199,
+    suv_ertiga: 899,
+    suv_carens: 949,
+    suv_inova: 999,
+    suv_inova_premium: 1299,
     extraKmCharge: {
-      hatchback: 12,
-      sedan: 14,
-      suv: 18,
-      premium_sedan: 22
+      hatchback: 14,
+      sedan: 15,
+      suv_ertiga: 18,
+      suv_carens: 16,
+      suv_inova: 20,
+      suv_inova_premium: 32
     },
     extraHourCharge: {
       hatchback: 150,
       sedan: 175,
-      suv: 200,
-      premium_sedan: 250
+      suv_ertiga: 200,
+      suv_carens: 200,
+      suv_inova: 220,
+      suv_inova_premium: 300
     }
   },
-  '4_40': { // NAYA PACKAGE
+  '4_40': {
     hours: 4,
     km: 40,
     hatchback: 899,
     sedan: 999,
-    suv: 1299,
-    premium_sedan: 1799,
+    suv_ertiga: 1299,
+    suv_carens: 1349,
+    suv_inova: 1399,
+    suv_inova_premium: 1799,
     extraKmCharge: {
-      hatchback: 12,
-      sedan: 14,
-      suv: 18,
-      premium_sedan: 22
+      hatchback: 14,
+      sedan: 15,
+      suv_ertiga: 18,
+      suv_carens: 16,
+      suv_inova: 20,
+      suv_inova_premium: 32
     },
     extraHourCharge: {
       hatchback: 150,
       sedan: 175,
-      suv: 200,
-      premium_sedan: 250
+      suv_ertiga: 200,
+      suv_carens: 200,
+      suv_inova: 220,
+      suv_inova_premium: 300
     }
   },
   '8_80': {
@@ -153,19 +251,31 @@ export const LOCAL_PACKAGES = {
     km: 80,
     hatchback: 1299,
     sedan: 1499,
-    suv: 1899,
-    premium_sedan: 2499,
+    suv_ertiga: 1899,
+    suv_carens: 1999,
+    suv_inova: 2099,
+    suv_inova_premium: 2499,
+    traveller_12_1: 4500,
+    traveller_maharaja_12_1: 5000,
     extraKmCharge: {
-      hatchback: 12,
-      sedan: 14,
-      suv: 18,
-      premium_sedan: 22
+      hatchback: 14,
+      sedan: 15,
+      suv_ertiga: 18,
+      suv_carens: 16,
+      suv_inova: 20,
+      suv_inova_premium: 32,
+      traveller_12_1: 25,
+      traveller_maharaja_12_1: 28
     },
     extraHourCharge: {
       hatchback: 150,
       sedan: 175,
-      suv: 200,
-      premium_sedan: 250
+      suv_ertiga: 200,
+      suv_carens: 200,
+      suv_inova: 220,
+      suv_inova_premium: 300,
+      traveller_12_1: 350,
+      traveller_maharaja_12_1: 400
     }
   },
   '12_120': {
@@ -173,29 +283,54 @@ export const LOCAL_PACKAGES = {
     km: 120,
     hatchback: 1799,
     sedan: 1999,
-    suv: 2499,
-    premium_sedan: 3299,
+    suv_ertiga: 2499,
+    suv_carens: 2599,
+    suv_inova: 2699,
+    suv_inova_premium: 3299,
+    traveller_12_1: 6000,
+    traveller_17_1: 7000,
+    traveller_maharaja_12_1: 6800,
+    traveller_maharaja_15_1: 7500,
     extraKmCharge: {
-      hatchback: 12,
-      sedan: 14,
-      suv: 18,
-      premium_sedan: 22
+      hatchback: 14,
+      sedan: 15,
+      suv_ertiga: 18,
+      suv_carens: 16,
+      suv_inova: 20,
+      suv_inova_premium: 32,
+      traveller_12_1: 25,
+      traveller_17_1: 27,
+      traveller_maharaja_12_1: 28,
+      traveller_maharaja_15_1: 32
     },
     extraHourCharge: {
       hatchback: 150,
       sedan: 175,
-      suv: 200,
-      premium_sedan: 250
+      suv_ertiga: 200,
+      suv_carens: 200,
+      suv_inova: 220,
+      suv_inova_premium: 300,
+      traveller_12_1: 350,
+      traveller_17_1: 400,
+      traveller_maharaja_12_1: 400,
+      traveller_maharaja_15_1: 450
     }
   }
 };
-// Airport Transfer Base Prices
+
+// --- [UPDATED] Airport Transfer Base Prices ---
 export const AIRPORT_BASE_PRICE = {
   HATCHBACK: 499,
   SEDAN: 599,
-  SUV: 799,
-  PREMIUM_SEDAN: 999
+  SUV_ERTIGA: 799,
+  SUV_CARENS: 849,
+  SUV_INOVA: 899,
+  SUV_INOVA_6_1: 899,
+  SUV_INOVA_7_1: 949,
+  SUV_INOVA_PREMIUM: 1199
+  // Travellers not typical for airport base price
 };
+
 // Booking Types (UPDATED with 4 packages)
 export const BOOKING_TYPES = {
   ONE_WAY: 'ONE_WAY',
@@ -207,33 +342,23 @@ export const BOOKING_TYPES = {
   AIRPORT_PICKUP: 'AIRPORT_PICKUP',
   AIRPORT_DROP: 'AIRPORT_DROP'
 };
-// Vehicle Types
-export const VEHICLE_TYPES = {
-  HATCHBACK: 'HATCHBACK',
-  SEDAN: 'SEDAN',
-  SUV: 'SUV',
-  PREMIUM_SEDAN: 'PREMIUM_SEDAN'
-};
+
 // Tax Configuration
 export const TAX_CONFIG = {
   GST_RATE: 0.05 // 5% GST
 };
 
-// --- [NEW] ---
 // Outstation Surcharges (Estimates)
-// These are estimates for tolls, state permits, etc.
-// In a real app, this should come from a route API (like Google)
 export const OUTSTATION_SURCHARGES = {
   TOLL_PER_KM: 1.5, // Estimated ₹1.5 per km for tolls
   STATE_PERMIT_HATCHBACK: 300,
   STATE_PERMIT_SEDAN: 400,
-  STATE_PERMIT_SUV: 500,
-  STATE_PERMIT_PREMIUM_SEDAN: 600,
+  STATE_PERMIT_SUV: 500, // Generic SUV
+  STATE_PERMIT_TRAVELLER: 800, // Generic Traveller
   DEFAULT_STATE_PERMIT_FEE: 450 // Fallback
 };
-// --- [END NEW] ---
 
-// --- [NEW] ADD-ON SERVICES ---
+// ADD-ON SERVICES
 export const ADD_ON_SERVICES = {
   LUGGAGE: {
     name: 'Assured luggage space',
@@ -256,23 +381,43 @@ export const ADD_ON_SERVICES = {
     price: 315,
   }
 };
-// --- [END NEW] ---
 
-// Vehicle Capacity Configuration
+// --- [UPDATED] Vehicle Capacity Configuration ---
 export const VEHICLE_CAPACITY = {
   HATCHBACK: { passengers: 4, luggage: 2 },
   SEDAN: { passengers: 4, luggage: 3 },
-  SUV: { passengers: 6, luggage: 4 },
-  PREMIUM_SEDAN: { passengers: 4, luggage: 3 }
+  SUV_ERTIGA: { passengers: 6, luggage: 4 },
+  SUV_CARENS: { passengers: 6, luggage: 4 },
+  SUV_INOVA: { passengers: 6, luggage: 4 },
+  SUV_INOVA_6_1: { passengers: 6, luggage: 4 },
+  SUV_INOVA_7_1: { passengers: 7, luggage: 4 },
+  SUV_INOVA_PREMIUM: { passengers: 6, luggage: 4 },
+  TRAVELLER_12_1: { passengers: 12, luggage: 10 },
+  TRAVELLER_17_1: { passengers: 17, luggage: 15 },
+  TRAVELLER_20_1: { passengers: 20, luggage: 18 },
+  TRAVELLER_26_1: { passengers: 26, luggage: 22 },
+  TRAVELLER_MAHARAJA_12_1: { passengers: 12, luggage: 10 },
+  TRAVELLER_MAHARAJA_15_1: { passengers: 15, luggage: 12 }
 };
-// Vehicle Features
+
+// --- [UPDATED] Vehicle Features ---
 export const VEHICLE_FEATURES = {
-  HATCHBACK: ['AC', 'Music System', 'Central Locking'],
-  SEDAN: ['AC', 'Music System', 'Central Locking', 'Power Windows'],
-  SUV: ['AC', 'Music System', 'Central Locking', 'Power Windows', 'Extra Space'],
-  PREMIUM_SEDAN: ['AC', 'Premium Music System', 'Leather Seats', 'Premium Interior']
+  HATCHBACK: ['AC', 'Music System'],
+  SEDAN: ['AC', 'Music System', 'Power Windows'],
+  SUV_ERTIGA: ['AC', 'Music System', 'Extra Space', '6+1 Seating'],
+  SUV_CARENS: ['AC', 'Music System', 'Extra Space', 'Sunroof', '6+1 Seating'],
+  SUV_INOVA: ['AC', 'Music System', 'Extra Space', 'Captain Seats', '6+1 Seating'],
+  SUV_INOVA_6_1: ['AC', 'Music System', 'Extra Space', '6+1 Seating'],
+  SUV_INOVA_7_1: ['AC', 'Music System', 'Extra Space', '7+1 Seating'],
+  SUV_INOVA_PREMIUM: ['AC', 'Premium Music', 'Leather Seats', 'Sunroof', '6+1 Seating'],
+  TRAVELLER_12_1: ['AC', 'Music System', '12+1 Seating'],
+  TRAVELLER_17_1: ['AC', 'Music System', '17+1 Seating'],
+  TRAVELLER_20_1: ['AC', 'Music System', '20+1 Seating'],
+  TRAVELLER_26_1: ['AC', 'Music System', '26+1 Seating'],
+  TRAVELLER_MAHARAJA_12_1: ['AC', 'Premium Interior', 'Music System', '12+1 Seating'],
+  TRAVELLER_MAHARAJA_15_1: ['AC', 'Premium Interior', 'Music System', '15+1 Seating']
 };
-// Distance Configuration
+
 // Distance Configuration
 export const DISTANCE_CONFIG = {
   MIN_DISTANCE: 50,
@@ -283,6 +428,7 @@ export const DISTANCE_CONFIG = {
   AVERAGE_SPEED_CITY: 30 // km/h
 };
 
+// Booking Configuration
 export const BOOKING_CONFIG = {
   CANCELLATION_WINDOW_HOURS: 24,
   CANCELLATION_CHARGE_PERCENT: 0.20,
@@ -310,7 +456,7 @@ export const NOTIFICATION_TYPES = {
   PAYMENT_RECEIVED: 'PAYMENT_RECEIVED',
   OTP_SENT: 'OTP_SENT',
   RATING_RECEIVED: 'RATING_RECEIVED',
-  ADMIN_ALERT: 'ADMIN_ALERT' // --- [NEW] ---
+  ADMIN_ALERT: 'ADMIN_ALERT'
 };
 // Socket Events
 export const SOCKET_EVENTS = {
@@ -360,6 +506,7 @@ export const DEFAULTS = {
   COUNTRY: 'India',
   TIMEZONE: 'Asia/Kolkata'
 };
+
 export default {
   ENV,
   STATUS_CODES,
@@ -377,8 +524,8 @@ export default {
   BOOKING_TYPES,
   VEHICLE_TYPES,
   TAX_CONFIG,
-  OUTSTATION_SURCHARGES, // --- [NEW] ---
-  ADD_ON_SERVICES, // --- [NEW] ---
+  OUTSTATION_SURCHARGES,
+  ADD_ON_SERVICES,
   VEHICLE_CAPACITY,
   VEHICLE_FEATURES,
   DISTANCE_CONFIG,

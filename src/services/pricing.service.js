@@ -1,4 +1,4 @@
-// src/services/pricing.service.js - UPDATED with Toll/Tax Logic
+// src/services/pricing.service.js - UPDATED with new One-Way/Round-Trip Logic
 import {
   PRICING,
   LOCAL_PACKAGES,
@@ -10,17 +10,14 @@ import {
   VEHICLE_FEATURES,
   DISTANCE_CONFIG,
   BOOKING_CONFIG,
-  OUTSTATION_SURCHARGES // --- [NEW] ---
+  OUTSTATION_SURCHARGES
 } from '../config/constants.js';
 import { BadRequestError } from '../utils/customError.js';
 import { calculateGST, isNightTime } from '../utils/helpers.js';
 import logger from '../config/logger.js';
 
-// --- [NEW] ---
 // This constant defines the minimum KMs charged per day for a multi-day round trip.
-// It's placed here because constants.js was not requested for update.
 const MIN_OUTSTATION_KM_PER_DAY = DISTANCE_CONFIG.MIN_OUTSTATION_KM_PER_DAY || 50;
-// --- [END NEW] ---
 
 
 class PricingService {
@@ -186,15 +183,15 @@ class PricingService {
 
   /**
    * Calculate fare for outstation trips (one-way or round trip)
-   * UPDATED: Now supports multi-day round trip and toll/tax logic
+   * UPDATED: Now supports one-way/round-trip rates and new toll logic
    */
   calculateOutstationFare(
     vehicleType,
     distance,
     isRoundTrip = false,
     startDateTime = new Date(),
-    endDateTime = null, // --- [MODIFIED] ---
-    includeTolls = false // --- [NEW] ---
+    endDateTime = null,
+    includeTolls = false
   ) {
     const cacheKey = this.generateCacheKey('outstation', {
       vehicleType,
@@ -202,7 +199,7 @@ class PricingService {
       isRoundTrip,
       date: new Date(startDateTime).toDateString(),
       endDate: endDateTime ? new Date(endDateTime).toDateString() : null,
-      includeTolls // --- [NEW] ---
+      includeTolls
     });
 
     const cached = this.getFromCache(cacheKey);
@@ -231,7 +228,15 @@ class PricingService {
       // PRICING CALCULATION
       // ========================================
 
-      // --- [MODIFIED] Round Trip Logic ---
+      // --- [MODIFIED] Select rate based on trip type ---
+      const perKmRate = isRoundTrip ? rates.perKmRateRoundTrip : rates.perKmRateOneWay;
+      if (!perKmRate) {
+        throw new BadRequestError(
+          `Pricing not configured for ${isRoundTrip ? 'round trip' : 'one-way'} for ${normalizedVehicleType}`
+        );
+      }
+      // --- [END MODIFIED] ---
+
       let totalDistance;
       let numberOfDays = 1;
       let breakdownCalculation;
@@ -242,14 +247,12 @@ class PricingService {
 
         // 2. Calculate number of calendar days
         const start = new Date(startDateTime);
-        // If no end date or end date is before start, assume 1 day
         const end = (endDateTime && new Date(endDateTime) > start) ? new Date(endDateTime) : new Date(startDateTime);
 
         const msPerDay = 1000 * 60 * 60 * 24;
         const utcStart = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
         const utcEnd = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
 
-        // +1 to include both start and end dates
         numberOfDays = Math.max(1, ((utcEnd - utcStart) / msPerDay) + 1);
 
         // 3. Calculate minimum distance based on days
@@ -259,29 +262,25 @@ class PricingService {
         totalDistance = Math.max(actualRoundTripDistance, minKmByDays);
 
         if (totalDistance > actualRoundTripDistance) {
-          breakdownCalculation = `${numberOfDays} day(s) × ${MIN_OUTSTATION_KM_PER_DAY} km/day = ${totalDistance} km (Minimum daily charge applied)`;
+          breakdownCalculation = `${numberOfDays} day(s) × ${MIN_OUTSTATION_KM_PER_DAY} km/day = ${totalDistance} km (Minimum daily charge) × ₹${perKmRate}/km`;
         } else {
-          breakdownCalculation = `${actualRoundTripDistance} km (Actual round trip) × ₹${rates.perKmRate}/km`;
+          breakdownCalculation = `${actualRoundTripDistance} km (Actual round trip) × ₹${perKmRate}/km`;
         }
 
       } else {
-        // One-way logic (unchanged)
+        // One-way logic
         totalDistance = Math.round(validDistance * 10) / 10;
-        breakdownCalculation = `${totalDistance} km × ₹${rates.perKmRate}/km`;
+        breakdownCalculation = `${totalDistance} km × ₹${perKmRate}/km`;
       }
-      // --- [END MODIFIED] ---
 
-      let baseFare = totalDistance * rates.perKmRate;
+      let baseFare = totalDistance * perKmRate;
 
-      // --- [MODIFIED] Min fare logic simplified ---
-      // The daily km rule replaces the old 1.5x multiplier for min fare.
-      // We just ensure the fare is not below the absolute minimum fare.
+      // Min fare logic
       const minFareToApply = rates.minFare;
-
       const minFareApplied = baseFare < minFareToApply;
       if (minFareApplied) {
         baseFare = minFareToApply;
-        breakdownCalculation = `Minimum fare applied = ₹${Math.round(baseFare)}`;
+        breakdownCalculation = `Minimum fare (₹${minFareToApply}) applied`;
       }
 
       // Night charges
@@ -293,20 +292,29 @@ class PricingService {
         nightCharges = baseFare * (nightMultiplier - 1);
       }
 
-      // --- [NEW] Toll & Tax Logic ---
+      // Toll & Tax Logic
       let tollCharges = 0;
       let stateTax = 0;
 
       if (includeTolls) {
         tollCharges = totalDistance * (OUTSTATION_SURCHARGES.TOLL_PER_KM || 1.5);
-        stateTax = OUTSTATION_SURCHARGES[`STATE_PERMIT_${normalizedVehicleType}`] ||
-          OUTSTATION_SURCHARGES.DEFAULT_STATE_PERMIT_FEE ||
-          500;
+        // Simplified state tax logic
+        let statePermitKey = 'DEFAULT_STATE_PERMIT_FEE';
+        if (normalizedVehicleType.includes('TRAVELLER')) {
+          statePermitKey = 'STATE_PERMIT_TRAVELLER';
+        } else if (normalizedVehicleType.includes('SUV')) {
+          statePermitKey = 'STATE_PERMIT_SUV';
+        } else if (normalizedVehicleType === 'SEDAN') {
+          statePermitKey = 'STATE_PERMIT_SEDAN';
+        } else if (normalizedVehicleType === 'HATCHBACK') {
+          statePermitKey = 'STATE_PERMIT_HATCHBACK';
+        }
+
+        stateTax = OUTSTATION_SURCHARGES[statePermitKey] || OUTSTATION_SURCHARGES.DEFAULT_STATE_PERMIT_FEE || 450;
       }
-      // --- [END NEW] ---
 
       // Calculate totals
-      const subtotal = baseFare + nightCharges + tollCharges + stateTax; // --- [MODIFIED] ---
+      const subtotal = baseFare + nightCharges + tollCharges + stateTax;
       const gst = calculateGST(subtotal, TAX_CONFIG.GST_RATE);
       const totalFare = subtotal;
       const finalAmount = subtotal + gst;
@@ -315,7 +323,7 @@ class PricingService {
       const avgSpeed = DISTANCE_CONFIG.AVERAGE_SPEED_HIGHWAY || 60;
       const estimatedHours = (totalDistance / avgSpeed).toFixed(1);
 
-      // --- [NEW] Dynamic Inclusions/Exclusions ---
+      // Dynamic Inclusions/Exclusions
       const inclusions = [
         'Driver allowance',
         'Fuel charges included',
@@ -333,7 +341,6 @@ class PricingService {
         includeTolls ? null : 'State permit charges (if applicable)',
         'Extra km beyond agreed distance'
       ].filter(Boolean);
-      // --- [END NEW] ---
 
 
       // Build response
@@ -342,34 +349,34 @@ class PricingService {
         bookingType: isRoundTrip ? BOOKING_TYPES.ROUND_TRIP : BOOKING_TYPES.ONE_WAY,
         baseFare: Math.round(baseFare),
         distance: totalDistance,
-        numberOfDays: isRoundTrip ? numberOfDays : null, // --- [NEW] ---
+        numberOfDays: isRoundTrip ? numberOfDays : null,
         duration: null,
         nightCharges: Math.round(nightCharges),
-        tollCharges: Math.round(tollCharges), // --- [NEW] ---
-        stateTax: Math.round(stateTax), // --- [NEW] ---
+        tollCharges: Math.round(tollCharges),
+        stateTax: Math.round(stateTax),
         isNightTime: isNight,
         subtotal: Math.round(subtotal),
         gst: Math.round(gst),
         gstRate: `${TAX_CONFIG.GST_RATE * 100}%`,
         totalFare: Math.round(totalFare),
         finalAmount: Math.round(finalAmount),
-        perKmRate: rates.perKmRate,
+        perKmRate: perKmRate,
         minFareApplied,
         estimatedTravelTime: `${estimatedHours} hours`,
         validUntil: new Date(Date.now() + 60 * 60 * 1000),
-        inclusions, // --- [MODIFIED] ---
-        exclusions, // --- [MODIFIED] ---
+        inclusions,
+        exclusions,
         breakdown: {
-          calculation: breakdownCalculation.includes('Minimum fare applied')
+          calculation: breakdownCalculation.includes('Minimum fare')
             ? breakdownCalculation
-            : `${breakdownCalculation} = ₹${Math.round(baseFare)}`, // --- [MODIFIED] ---
+            : `${breakdownCalculation} = ₹${Math.round(baseFare)}`,
           nightCharges: nightCharges > 0
             ? `Night charges (${((rates.nightChargeMultiplier || 1.2) - 1) * 100}%) = ₹${Math.round(nightCharges)}`
             : null,
-          tollCharges: tollCharges > 0 // --- [NEW] ---
+          tollCharges: tollCharges > 0
             ? `Toll charges (Est.) = ₹${Math.round(tollCharges)}`
             : null,
-          stateTax: stateTax > 0 // --- [NEW] ---
+          stateTax: stateTax > 0
             ? `State permit charges (Est.) = ₹${Math.round(stateTax)}`
             : null,
           gst: `GST (${TAX_CONFIG.GST_RATE * 100}%) = ₹${Math.round(gst)}`,
@@ -377,7 +384,7 @@ class PricingService {
         },
         tripDetails: {
           startTime: tripDate.toISOString(),
-          endTime: endDateTime ? new Date(endDateTime).toISOString() : null, // --- [NEW] ---
+          endTime: endDateTime ? new Date(endDateTime).toISOString() : null,
           isRoundTrip,
           distance: totalDistance,
           estimatedDuration: estimatedHours
@@ -388,8 +395,8 @@ class PricingService {
         vehicleType: normalizedVehicleType,
         distance: totalDistance,
         isRoundTrip,
-        numberOfDays, // --- [NEW] ---
-        includeTolls, // --- [NEW] ---
+        numberOfDays,
+        includeTolls,
         isNight,
         minFareApplied,
         finalAmount: fareData.finalAmount
@@ -619,10 +626,17 @@ class PricingService {
         );
       }
 
+      // --- [MODIFIED] Use oneWay rate for extra km ---
+      const perKmRate = rates.perKmRateOneWay;
+      if (!perKmRate) {
+        throw new BadRequestError(`One-way pricing not configured for ${normalizedVehicleType}`);
+      }
+      // --- [END MODIFIED] ---
+
       // Pricing calculation
       const freeKm = DISTANCE_CONFIG.FREE_KM_FOR_AIRPORT || 10;
       const extraKm = Math.max(0, validDistance - freeKm);
-      const extraKmCharge = extraKm * rates.perKmRate;
+      const extraKmCharge = extraKm * perKmRate;
       let baseFare = basePrice + extraKmCharge;
 
       // Night charges
@@ -660,7 +674,7 @@ class PricingService {
         gstRate: `${TAX_CONFIG.GST_RATE * 100}%`,
         totalFare: Math.round(subtotal),
         finalAmount: Math.round(finalAmount),
-        perKmRate: rates.perKmRate,
+        perKmRate: perKmRate, // --- [MODIFIED] ---
         estimatedTravelTime: `${estimatedMinutes} minutes`,
         validUntil: new Date(Date.now() + 60 * 60 * 1000),
         inclusions: [
@@ -675,14 +689,14 @@ class PricingService {
         exclusions: [
           'Toll charges (paid separately)',
           'Parking charges at airport',
-          `Extra km beyond ${freeKm} km: ₹${rates.perKmRate}/km`,
+          `Extra km beyond ${freeKm} km: ₹${perKmRate}/km`, // --- [MODIFIED] ---
           'Waiting charges after 30 minutes'
         ],
         breakdown: {
           basePrice: `Base charge = ₹${basePrice}`,
           freeKm: `First ${freeKm} km included`,
           extraKm: extraKm > 0
-            ? `Extra ${Math.round(extraKm * 10) / 10} km × ₹${rates.perKmRate} = ₹${Math.round(extraKmCharge)}`
+            ? `Extra ${Math.round(extraKm * 10) / 10} km × ₹${perKmRate} = ₹${Math.round(extraKmCharge)}` // --- [MODIFIED] ---
             : 'No extra km',
           nightCharges: nightCharges > 0
             ? `Night charges (${((rates.nightChargeMultiplier || 1.2) - 1) * 100}%) = ₹${Math.round(nightCharges)}`
@@ -760,11 +774,8 @@ class PricingService {
         ? new Date(params.startDateTime)
         : new Date();
 
-      const endDateTime = params.endDateTime ? new Date(params.endDateTime) : null; // --- [MODIFIED] ---
-
-      // --- [NEW] ---
+      const endDateTime = params.endDateTime ? new Date(params.endDateTime) : null;
       const includeTolls = params.includeTolls || false;
-      // --- [END NEW] ---
 
       // Calculate fares for all vehicle types
       Object.values(VEHICLE_TYPES).forEach(vehicleType => {
@@ -778,8 +789,8 @@ class PricingService {
                 params.distance,
                 false,
                 startDateTime,
-                null, // --- [MODIFIED] ---
-                includeTolls // --- [NEW] ---
+                null,
+                includeTolls
               );
               break;
 
@@ -790,7 +801,7 @@ class PricingService {
                 true,
                 startDateTime,
                 endDateTime,
-                includeTolls 
+                includeTolls
               );
               break;
 
@@ -873,7 +884,7 @@ class PricingService {
 
       logger.info('Vehicle options generated', {
         bookingType,
-        includeTolls, // --- [NEW] ---
+        includeTolls,
         optionsCount: options.length,
         distance: params.distance || 'N/A'
       });
@@ -984,7 +995,7 @@ class PricingService {
   }
 
   // ========================================
-  // HELPER METHODS
+  // HELPER METHODS (UPDATED)
   // ========================================
 
   getVehicleCapacity(vehicleType) {
@@ -1009,8 +1020,18 @@ class PricingService {
     const models = {
       [VEHICLE_TYPES.HATCHBACK]: ['Maruti Swift', 'Hyundai i20', 'Tata Altroz'],
       [VEHICLE_TYPES.SEDAN]: ['Honda City', 'Maruti Ciaz', 'Hyundai Verna'],
-      [VEHICLE_TYPES.SUV]: ['Toyota Innova', 'Maruti Ertiga', 'Mahindra Scorpio'],
-      [VEHICLE_TYPES.PREMIUM_SEDAN]: ['Honda Accord', 'Toyota Camry', 'BMW 3 Series']
+      [VEHICLE_TYPES.SUV_ERTIGA]: ['Maruti Ertiga', 'Renault Triber'],
+      [VEHICLE_TYPES.SUV_CARENS]: ['Kia Carens', 'Mahindra Marazzo'],
+      [VEHICLE_TYPES.SUV_INOVA]: ['Toyota Innova Crysta'],
+      [VEHICLE_TYPES.SUV_INOVA_6_1]: ['Toyota Innova Crysta (6+1)'],
+      [VEHICLE_TYPES.SUV_INOVA_7_1]: ['Toyota Innova Crysta (7+1)'],
+      [VEHICLE_TYPES.SUV_INOVA_PREMIUM]: ['Toyota Innova Hycross', 'Kia Carnival'],
+      [VEHICLE_TYPES.TRAVELLER_12_1]: ['Force Traveller (12 Seater)'],
+      [VEHICLE_TYPES.TRAVELLER_17_1]: ['Force Traveller (17 Seater)'],
+      [VEHICLE_TYPES.TRAVELLER_20_1]: ['Force Traveller (20 Seater)'],
+      [VEHICLE_TYPES.TRAVELLER_26_1]: ['Force Traveller (26 Seater)'],
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_12_1]: ['Tempo Traveller Maharaja (12 Seater)'],
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_15_1]: ['Tempo Traveller Maharaja (15 Seater)'],
     };
     return models[vehicleType] || [];
   }
@@ -1019,18 +1040,38 @@ class PricingService {
     const names = {
       [VEHICLE_TYPES.HATCHBACK]: 'AC Hatchback',
       [VEHICLE_TYPES.SEDAN]: 'AC Sedan',
-      [VEHICLE_TYPES.SUV]: 'AC SUV / MUV',
-      [VEHICLE_TYPES.PREMIUM_SEDAN]: 'Premium Sedan'
+      [VEHICLE_TYPES.SUV_ERTIGA]: 'AC SUV (Ertiga)',
+      [VEHICLE_TYPES.SUV_CARENS]: 'AC SUV (Kia Carens)',
+      [VEHICLE_TYPES.SUV_INOVA]: 'AC SUV (Innova)',
+      [VEHICLE_TYPES.SUV_INOVA_6_1]: 'AC SUV (Innova 6+1)',
+      [VEHICLE_TYPES.SUV_INOVA_7_1]: 'AC SUV (Innova 7+1)',
+      [VEHICLE_TYPES.SUV_INOVA_PREMIUM]: 'Premium SUV (Innova Hycross)',
+      [VEHICLE_TYPES.TRAVELLER_12_1]: 'Tempo Traveller (12+1)',
+      [VEHICLE_TYPES.TRAVELLER_17_1]: 'Tempo Traveller (17+1)',
+      [VEHICLE_TYPES.TRAVELLER_20_1]: 'Tempo Traveller (20+1)',
+      [VEHICLE_TYPES.TRAVELLER_26_1]: 'Tempo Traveller (26+1)',
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_12_1]: 'Maharaja Traveller (12+1)',
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_15_1]: 'Maharaja Traveller (15+1)',
     };
     return names[vehicleType] || vehicleType;
   }
 
   getVehicleDescription(vehicleType) {
     const descriptions = {
-      [VEHICLE_TYPES.HATCHBACK]: 'Economical and perfect for short trips',
-      [VEHICLE_TYPES.SEDAN]: 'Comfortable for city and outstation travel',
-      [VEHICLE_TYPES.SUV]: 'Spacious and ideal for families and groups',
-      [VEHICLE_TYPES.PREMIUM_SEDAN]: 'Luxury travel experience with premium amenities'
+      [VEHICLE_TYPES.HATCHBACK]: 'Economical and perfect for short trips.',
+      [VEHICLE_TYPES.SEDAN]: 'Comfortable for city and outstation travel.',
+      [VEHICLE_TYPES.SUV_ERTIGA]: 'Ideal for small groups, 6-seater.',
+      [VEHICLE_TYPES.SUV_CARENS]: 'Modern 6-seater with comfort features.',
+      [VEHICLE_TYPES.SUV_INOVA]: 'Reliable and spacious 6-seater.',
+      [VEHICLE_TYPES.SUV_INOVA_6_1]: 'Spacious 6-seater Innova.',
+      [VEHICLE_TYPES.SUV_INOVA_7_1]: 'Spacious 7-seater Innova.',
+      [VEHICLE_TYPES.SUV_INOVA_PREMIUM]: 'Luxury SUV experience with premium amenities.',
+      [VEHICLE_TYPES.TRAVELLER_12_1]: 'For medium-sized groups.',
+      [VEHICLE_TYPES.TRAVELLER_17_1]: 'For large-sized groups.',
+      [VEHICLE_TYPES.TRAVELLER_20_1]: 'For very large groups.',
+      [VEHICLE_TYPES.TRAVELLER_26_1]: 'For extra large groups.',
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_12_1]: 'Premium comfort for medium groups.',
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_15_1]: 'Premium comfort for large groups.',
     };
     return descriptions[vehicleType] || '';
   }
@@ -1039,8 +1080,18 @@ class PricingService {
     const bestFor = {
       [VEHICLE_TYPES.HATCHBACK]: 'Solo travelers & couples',
       [VEHICLE_TYPES.SEDAN]: 'Small families & business trips',
-      [VEHICLE_TYPES.SUV]: 'Large families & group travel',
-      [VEHICLE_TYPES.PREMIUM_SEDAN]: 'Luxury seekers & VIP travel'
+      [VEHICLE_TYPES.SUV_ERTIGA]: 'Families (up to 6)',
+      [VEHICLE_TYPES.SUV_CARENS]: 'Modern families (up to 6)',
+      [VEHICLE_TYPES.SUV_INOVA]: 'Group travel (up to 6)',
+      [VEHICLE_TYPES.SUV_INOVA_6_1]: 'Group travel (up to 6)',
+      [VEHICLE_TYPES.SUV_INOVA_7_1]: 'Large families (up to 7)',
+      [VEHICLE_TYPES.SUV_INOVA_PREMIUM]: 'VIPs & luxury seekers',
+      [VEHICLE_TYPES.TRAVELLER_12_1]: 'Group tours (12 passengers)',
+      [VEHICLE_TYPES.TRAVELLER_17_1]: 'Large events (17 passengers)',
+      [VEHICLE_TYPES.TRAVELLER_20_1]: 'Large events (20 passengers)',
+      [VEHICLE_TYPES.TRAVELLER_26_1]: 'Large events (26 passengers)',
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_12_1]: 'Luxury group travel (12 passengers)',
+      [VEHICLE_TYPES.TRAVELLER_MAHARAJA_15_1]: 'Luxury group travel (15 passengers)',
     };
     return bestFor[vehicleType] || '';
   }
