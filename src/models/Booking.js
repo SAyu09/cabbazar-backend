@@ -5,15 +5,12 @@ import {
   BOOKING_STATUS,
   VEHICLE_TYPES,
   USER_ROLES,
-  // PAYMENT_STATUS, // <-- REMOVED
-  // PAYMENT_METHODS, // <-- REMOVED
   TAX_CONFIG
 } from '../config/constants.js';
 import { generateBookingReference } from '../utils/helpers.js';
 
 // ------------------ Sub-schemas ------------------
 
-// Kept your new simplified location schema
 const locationSchema = new mongoose.Schema({
   city: {
     type: String,
@@ -70,6 +67,10 @@ const fareSchema = new mongoose.Schema({
   gstRate: { type: String },
   totalFare: { type: Number, required: true, min: 0 },
   finalAmount: { type: Number, required: true, min: 0 },
+  // --- [NEW] Advance Payment Fields ---
+  advanceAmount: { type: Number, default: 0, min: 0 },
+  remainingAmount: { type: Number, default: 0, min: 0 },
+  // ------------------------------------
   perKmRate: { type: Number, min: 0 },
   minFareApplied: { type: Boolean },
   estimatedTravelTime: { type: String },
@@ -83,13 +84,13 @@ const fareSchema = new mongoose.Schema({
   extraKmRate: { type: Number },
   extraHourRate: { type: Number },
   tollCharges: { type: Number, default: 0, min: 0 },
-  stateTax: { type: Number, default: 0, min: 0 }, // --- [NEW] ---
+  stateTax: { type: Number, default: 0, min: 0 },
   parkingCharges: { type: Number, default: 0, min: 0 },
   driverAllowance: { type: Number, default: 0, min: 0 },
   discountCode: { type: String, trim: true, uppercase: true },
   discountAmount: { type: Number, default: 0, min: 0 },
   discountType: { type: String, enum: ['PERCENTAGE', 'FIXED', null] },
-  addOnsTotal: { type: Number, default: 0, min: 0 }, // --- [NEW] ---
+  addOnsTotal: { type: Number, default: 0, min: 0 },
 }, { _id: false });
 
 const cancellationSchema = new mongoose.Schema({
@@ -236,16 +237,12 @@ const bookingSchema = new mongoose.Schema({
     required: [true, 'Fare details are required'],
   },
 
-  // --- PAYMENT FIELDS MODIFIED ---
+  // --- PAYMENT FIELDS ---
   paymentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Payment',
     default: null,
   },
-  // --- OLD FIELDS REMOVED ---
-  // paymentStatus: { ... },
-  // paymentMethod: { ... },
-  // paymentTransactionId: { ... },
 
   cancellation: { type: cancellationSchema, default: null },
   rating: { type: ratingSchema, default: null },
@@ -254,7 +251,6 @@ const bookingSchema = new mongoose.Schema({
   specialRequests: { type: [String], default: [] },
   notes: { type: String, trim: true, maxlength: 500 },
 
-  // --- [NEW] ---
   addOnServices: {
     type: [{
       code: String,
@@ -263,7 +259,6 @@ const bookingSchema = new mongoose.Schema({
     }],
     default: []
   },
-  // --- [END NEW] ---
 
 }, {
   timestamps: true,
@@ -272,7 +267,6 @@ const bookingSchema = new mongoose.Schema({
 });
 
 // ------------------ Hooks ------------------
-// (Your existing hooks are perfect)
 bookingSchema.pre('save', async function (next) {
   if (this.isNew && !this.bookingId) {
     this.bookingId = generateBookingReference();
@@ -296,7 +290,6 @@ bookingSchema.pre('save', async function (next) {
 });
 
 // ------------------ Indexes ------------------
-// (Kept your indexes)
 bookingSchema.index({ 'pickupLocation.lat': 1, 'pickupLocation.lng': 1 });
 bookingSchema.index({ 'dropLocation.lat': 1, 'dropLocation.lng': 1 });
 bookingSchema.index({ userId: 1, status: 1, startDateTime: -1 });
@@ -304,7 +297,6 @@ bookingSchema.index({ driverId: 1, status: 1, startDateTime: -1 });
 bookingSchema.index({ startDateTime: 1, status: 1 });
 
 // ------------------ Virtuals ------------------
-// (Kept your virtuals)
 bookingSchema.virtual('tripDurationMinutes').get(function () {
   if (this.trip?.actualStartTime && this.trip?.actualEndTime) {
     return Math.round((this.trip.actualEndTime - this.trip.actualStartTime) / (1000 * 60));
@@ -315,6 +307,5 @@ bookingSchema.virtual('tripDurationMinutes').get(function () {
   return null;
 });
 
-// ------------------ Model Export ------------------
 const Booking = mongoose.model('Booking', bookingSchema);
 export default Booking;

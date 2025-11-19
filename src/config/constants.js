@@ -1,6 +1,4 @@
-// src/config/constants.js - Complete Application Constants (NEW PRICING)
-
-import Razorpay from "razorpay";
+// src/config/constants.js - Complete Application Constants
 
 // Environment
 export const ENV = {
@@ -69,7 +67,8 @@ export const BOOKING_STATUS = {
 export const PAYMENT_STATUS = {
   PENDING: 'PENDING',
   PROCESSING: 'PROCESSING',
-  COMPLETED: 'COMPLETED',
+  COMPLETED: 'COMPLETED', // Full payment done
+  ADVANCED: 'ADVANCED',   // --- [NEW] Advance payment done
   FAILED: 'FAILED',
   REFUNDED: 'REFUNDED',
   PARTIALLY_REFUNDED: 'PARTIALLY_REFUNDED'
@@ -84,7 +83,7 @@ export const PAYMENT_METHODS = {
   NET_BANKING: 'NET_BANKING'
 };
 
-// --- [NEW] Vehicle Types ---
+// Vehicle Types
 export const VEHICLE_TYPES = {
   HATCHBACK: 'HATCHBACK',
   SEDAN: 'SEDAN',
@@ -102,7 +101,7 @@ export const VEHICLE_TYPES = {
   TRAVELLER_MAHARAJA_15_1: 'TRAVELLER_MAHARAJA_15_1'
 };
 
-// --- [NEW] Pricing Configuration ---
+// Pricing Configuration
 export const PRICING = {
   HATCHBACK: {
     perKmRateOneWay: 14,
@@ -190,9 +189,7 @@ export const PRICING = {
   }
 };
 
-// --- [UPDATED] Local Package Configuration ---
-// Keys are lowercase to match pricing.service.js logic
-// Prices are estimated, only extraKmCharge is updated from new rates
+// Local Package Configuration
 export const LOCAL_PACKAGES = {
   '2_20': {
     hours: 2,
@@ -318,7 +315,7 @@ export const LOCAL_PACKAGES = {
   }
 };
 
-// --- [UPDATED] Airport Transfer Base Prices ---
+// Airport Transfer Base Prices
 export const AIRPORT_BASE_PRICE = {
   HATCHBACK: 499,
   SEDAN: 599,
@@ -328,10 +325,9 @@ export const AIRPORT_BASE_PRICE = {
   SUV_INOVA_6_1: 899,
   SUV_INOVA_7_1: 949,
   SUV_INOVA_PREMIUM: 1199
-  // Travellers not typical for airport base price
 };
 
-// Booking Types (UPDATED with 4 packages)
+// Booking Types
 export const BOOKING_TYPES = {
   ONE_WAY: 'ONE_WAY',
   ROUND_TRIP: 'ROUND_TRIP',
@@ -353,36 +349,21 @@ export const OUTSTATION_SURCHARGES = {
   TOLL_PER_KM: 1.5, // Estimated ₹1.5 per km for tolls
   STATE_PERMIT_HATCHBACK: 300,
   STATE_PERMIT_SEDAN: 400,
-  STATE_PERMIT_SUV: 500, // Generic SUV
-  STATE_PERMIT_TRAVELLER: 800, // Generic Traveller
-  DEFAULT_STATE_PERMIT_FEE: 450 // Fallback
+  STATE_PERMIT_SUV: 500,
+  STATE_PERMIT_TRAVELLER: 800,
+  DEFAULT_STATE_PERMIT_FEE: 450
 };
 
 // ADD-ON SERVICES
 export const ADD_ON_SERVICES = {
-  LUGGAGE: {
-    name: 'Assured luggage space',
-    price: 105,
-  },
-  PET: {
-    name: 'Pet Allowed',
-    price: 840,
-  },
-  REFUNDABLE: {
-    name: 'Upgrade to Refundable booking',
-    price: 58,
-  },
-  NEW_CAR: {
-    name: 'Confirmed Car Model 2022 or above',
-    price: 420,
-  },
-  DRIVER_LANG: {
-    name: 'Preferred Driver language',
-    price: 315,
-  }
+  LUGGAGE: { name: 'Assured luggage space', price: 105 },
+  PET: { name: 'Pet Allowed', price: 840 },
+  REFUNDABLE: { name: 'Upgrade to Refundable booking', price: 58 },
+  NEW_CAR: { name: 'Confirmed Car Model 2022 or above', price: 420 },
+  DRIVER_LANG: { name: 'Preferred Driver language', price: 315 }
 };
 
-// --- [UPDATED] Vehicle Capacity Configuration ---
+// Vehicle Capacity Configuration
 export const VEHICLE_CAPACITY = {
   HATCHBACK: { passengers: 4, luggage: 2 },
   SEDAN: { passengers: 4, luggage: 3 },
@@ -400,7 +381,7 @@ export const VEHICLE_CAPACITY = {
   TRAVELLER_MAHARAJA_15_1: { passengers: 15, luggage: 12 }
 };
 
-// --- [UPDATED] Vehicle Features ---
+// Vehicle Features
 export const VEHICLE_FEATURES = {
   HATCHBACK: ['AC', 'Music System'],
   SEDAN: ['AC', 'Music System', 'Power Windows'],
@@ -422,10 +403,10 @@ export const VEHICLE_FEATURES = {
 export const DISTANCE_CONFIG = {
   MIN_DISTANCE: 50,
   MAX_DISTANCE: 2000,
-  MIN_OUTSTATION_KM_PER_DAY: 50,
+  MIN_OUTSTATION_KM_PER_DAY: 250,
   FREE_KM_FOR_AIRPORT: 10,
-  AVERAGE_SPEED_HIGHWAY: 60, // km/h
-  AVERAGE_SPEED_CITY: 30 // km/h
+  AVERAGE_SPEED_HIGHWAY: 60,
+  AVERAGE_SPEED_CITY: 30
 };
 
 // Booking Configuration
@@ -435,8 +416,10 @@ export const BOOKING_CONFIG = {
   MIN_BOOKING_HOURS_AHEAD: 2,
   ADVANCE_BOOKING_DAYS: 30,
   DRIVER_ACCEPTANCE_TIMEOUT_MINUTES: 5,
-  MAX_BOOKING_PER_DAY: 10
+  MAX_BOOKING_PER_DAY: 10,
+  ADVANCE_PAYMENT_PERCENTAGE: 0.20 // 20% Advance Payment
 };
+
 // OTP Configuration
 export const OTP_CONFIG = {
   EXPIRY_MINUTES: Number(process.env.OTP_EXPIRY_MINUTES) || 10,
@@ -444,6 +427,7 @@ export const OTP_CONFIG = {
   RESEND_TIMEOUT_SECONDS: Number(process.env.OTP_RESEND_TIMEOUT_SECONDS) || 60,
   LENGTH: 6
 };
+
 // Notification Types
 export const NOTIFICATION_TYPES = {
   BOOKING_CREATED: 'BOOKING_CREATED',
@@ -458,40 +442,37 @@ export const NOTIFICATION_TYPES = {
   RATING_RECEIVED: 'RATING_RECEIVED',
   ADMIN_ALERT: 'ADMIN_ALERT'
 };
+
 // Socket Events
 export const SOCKET_EVENTS = {
-  // Connection
   CONNECTION: 'connection',
   DISCONNECT: 'disconnect',
-  // User Events
   USER_JOINED: 'user:joined',
   USER_LEFT: 'user:left',
-  // Booking Events
   BOOKING_CREATED: 'booking:created',
   BOOKING_REQUEST: 'booking:request',
   BOOKING_ACCEPTED: 'booking:accepted',
   BOOKING_REJECTED: 'booking:rejected',
   BOOKING_CANCELLED: 'booking:cancelled',
   BOOKING_UPDATED: 'booking:updated',
-  // Trip Events
   TRIP_STARTED: 'trip:started',
   TRIP_UPDATED: 'trip:updated',
   TRIP_COMPLETED: 'trip:completed',
-  // Driver Events
   DRIVER_LOCATION: 'driver:location',
   DRIVER_STATUS: 'driver:status',
   DRIVER_ARRIVED: 'driver:arrived',
-  // Chat Events
   MESSAGE_SENT: 'message:sent',
   MESSAGE_RECEIVED: 'message:received',
   TYPING: 'typing'
 };
+
 // File Upload Configuration
 export const UPLOAD_CONFIG = {
   MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
   ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/jpg'],
   ALLOWED_DOCUMENT_TYPES: ['application/pdf', 'image/jpeg', 'image/png']
 };
+
 // Rate Limiting Configuration
 export const RATE_LIMIT = {
   WINDOW_MS: 15 * 60 * 1000, // 15 minutes
@@ -499,6 +480,7 @@ export const RATE_LIMIT = {
   OTP_MAX_REQUESTS: 3,
   OTP_WINDOW_MS: 60 * 60 * 1000 // 1 hour
 };
+
 // Default Values
 export const DEFAULTS = {
   LANGUAGE: 'en',

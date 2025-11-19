@@ -1,4 +1,4 @@
-// src/controllers/booking.controller.js - UPDATED with Multi-City Support
+// src/controllers/booking.controller.js - UPDATED with Advance Payment Logic
 import { Booking, User, Vehicle } from '../models/index.js';
 import Driver from '../models/Driver.js';
 import Payment from '../models/Payment.js';
@@ -80,7 +80,7 @@ const LOCAL_RENTAL_TYPES = [
 
 const LOCAL_RENTAL_MAX_DISTANCE = 80;
 const AIRPORT_MAX_DISTANCE = 200;
-const OUTSTATION_MIN_DISTANCE = 50;
+const OUTSTATION_MIN_DISTANCE = 250;
 const SHORT_DISTANCE_THRESHOLD = 50;
 const MAX_VIA_CITIES = 5; // Maximum intermediate stops allowed
 
@@ -644,23 +644,10 @@ export const searchCabs = catchAsync(async (req, res) => {
     throw new BadRequestError('Drop-off location (to) is required');
   }
 
-  // Check if from and to are the same
-  // if (from.toLowerCase().trim() === to.toLowerCase().trim()) {
-  //   throw new BadRequestError('Pickup and drop-off locations cannot be the same. For local trips, select a local package.');
-  // }
-
   // Validate via cities (support both 'via' and 'viaCities' for backward compatibility)
   const viaArray = via || viaCities || [];
   const validatedViaCities = validateViaCities(viaArray);
   const hasViaCities = validatedViaCities.length > 0;
-
-  // Check for duplicate cities in entire route
-  const allCities = [from, ...validatedViaCities, to].map(c => c.toLowerCase().trim());
-  const uniqueAllCities = [...new Set(allCities)];
-
-  // if (uniqueAllCities.length !== allCities.length) {
-  //   throw new BadRequestError('Duplicate cities found in route. Each city must be unique.');
-  // }
 
   // Validate date/time
   const tripDate = validateDateTime(date || startDateTime || Date.now());
@@ -808,6 +795,7 @@ export const searchCabs = catchAsync(async (req, res) => {
   const isLocalBooking = LOCAL_RENTAL_TYPES.includes(bookingType);
 
   // Pass endDateTime AND includeTolls to pricing service
+  // Pricing Service calculates Advance Amount and returns it in fareDetails
   const vehicleOptions = pricingService.getVehicleOptions(bookingType, {
     distance: isLocalBooking ? 0 : (distance || 0),
     startDateTime: tripDate,
@@ -841,7 +829,7 @@ export const searchCabs = catchAsync(async (req, res) => {
     isLocalRoute: (distance || 0) <= LOCAL_RENTAL_MAX_DISTANCE || isLocalBooking,
     isOutstationRoute: (distance || 0) >= OUTSTATION_MIN_DISTANCE,
     isMultiCity: hasViaCities,
-    options: vehicleOptions,
+    options: vehicleOptions, // Contains fareDetails with advanceAmount
     validUntil: addHours(new Date(), 1),
     timestamp: new Date(),
     routeInfo: hasViaCities ? {
@@ -916,8 +904,6 @@ export const getApplicableTypes = catchAsync(async (req, res) => {
  * @access  Private
  */
 export const createBooking = catchAsync(async (req, res) => {
-  // --- [MODIFIED] ---
-  // Simplified: We no longer get fareDetails from the client.
   const {
     bookingType,
     pickupLocation,
@@ -933,7 +919,8 @@ export const createBooking = catchAsync(async (req, res) => {
     distance, // This is the one-way distance from search
     paymentMethod = PAYMENT_METHODS.RAZORPAY,
     addOnCodes,
-    includeTolls // --- [ADDED] ---
+    includeTolls,
+    isAdvancePayment // --- [NEW] Flag to trigger advance payment logic
   } = req.body;
 
   // 1. Validate booking type
@@ -1002,15 +989,13 @@ export const createBooking = catchAsync(async (req, res) => {
       estimatedDistance = distanceResult.distance;
     }
 
-    // --- [MODIFIED] ---
-    // Get pricing options, passing endDateTime AND includeTolls
+    // Get pricing options
     const options = pricingService.getVehicleOptions(bookingType, {
       distance: estimatedDistance || 0,
       startDateTime: tripDate,
-      endDateTime: finalEndDateTime, // This is the FIX
-      includeTolls: includeTolls || false // --- [ADDED] ---
+      endDateTime: finalEndDateTime,
+      includeTolls: includeTolls || false
     });
-    // --- [END MODIFIED] ---
 
     const baseFareDetails = options.find(opt => opt.vehicleType === vehicleType)?.fareDetails;
 
@@ -1018,10 +1003,13 @@ export const createBooking = catchAsync(async (req, res) => {
       throw new BadRequestError(`No pricing found for ${vehicleType} on this route.`);
     }
 
-    // --- [SIMPLIFIED & FIXED] ---
     // Combine base fare with add-ons
     const newSubtotal = baseFareDetails.subtotal + addOnsTotal;
     const newGst = calculateGST(newSubtotal, TAX_CONFIG.GST_RATE);
+    const calculatedFinalAmount = Math.round(newSubtotal + newGst);
+
+    // --- RE-CALCULATE ADVANCE WITH ADD-ONS INCLUDED ---
+    const { advanceAmount, remainingAmount } = pricingService.calculateAdvance(calculatedFinalAmount);
 
     finalFareDetails = {
       ...baseFareDetails,
@@ -1029,11 +1017,12 @@ export const createBooking = catchAsync(async (req, res) => {
       subtotal: Math.round(newSubtotal),
       gst: Math.round(newGst),
       totalFare: Math.round(newSubtotal), // totalFare is pre-tax subtotal
-      finalAmount: Math.round(newSubtotal + newGst)
+      finalAmount: calculatedFinalAmount,
+      advanceAmount,   // Store updated advance
+      remainingAmount  // Store updated remaining
     };
 
-    finalAmount = finalFareDetails.finalAmount; // Get the final calculated amount
-    // --- [END SIMPLIFIED & FIXED] ---
+    finalAmount = finalFareDetails.finalAmount;
 
   } catch (error) {
     logger.error('Server-side fare calculation failed', { error: error.message, bookingType, vehicleType });
@@ -1044,7 +1033,21 @@ export const createBooking = catchAsync(async (req, res) => {
     throw new BadRequestError('Calculated fare is zero or negative. Cannot proceed');
   }
 
-  const amountInPaise = Math.round(finalAmount * 100);
+  // --- [UPDATED LOGIC FOR AMOUNT TO PAY NOW] ---
+  let amountToPayNow = finalAmount; // Default: Full Amount
+
+  // ONLY trigger advance logic if method is RAZORPAY AND isAdvancePayment flag is explicitly TRUE
+  if (paymentMethod === PAYMENT_METHODS.RAZORPAY && isAdvancePayment === true) {
+    amountToPayNow = finalFareDetails.advanceAmount;
+    logger.info('Processing Advance Payment Request', { bookingId: searchId, amount: amountToPayNow });
+  } else if (paymentMethod === PAYMENT_METHODS.RAZORPAY) {
+    // If isAdvancePayment is false or undefined, assume full payment for online flow
+    amountToPayNow = finalAmount;
+    logger.info('Processing Full Payment Request', { bookingId: searchId, amount: amountToPayNow });
+  }
+
+  const amountInPaise = Math.round(amountToPayNow * 100);
+
   // Build clean locations
   const cleanPickupLocation = buildLocationObject(pickupLocation);
   const cleanDropLocation = isLocalRental
@@ -1069,9 +1072,6 @@ export const createBooking = catchAsync(async (req, res) => {
     ? notes.trim().substring(0, 500)
     : null;
 
-
-
-    
   // ========================================
   // 9. CREATE BOOKING & PAYMENT DOCS
   // ========================================
@@ -1082,10 +1082,10 @@ export const createBooking = catchAsync(async (req, res) => {
     dropLocation: cleanDropLocation,
     viaLocations: cleanViaLocations,
     startDateTime: tripDate,
-    endDateTime: finalEndDateTime, // --- [MODIFIED] ---
+    endDateTime: finalEndDateTime,
     vehicleType,
     passengerDetails: finalPassengerDetails,
-    fareDetails: finalFareDetails, // --- [MODIFIED] ---
+    fareDetails: finalFareDetails,
     status: BOOKING_STATUS.PENDING,
     specialRequests: validSpecialRequests,
     notes: validNotes,
@@ -1104,9 +1104,10 @@ export const createBooking = catchAsync(async (req, res) => {
   const payment = new Payment({
     userId: req.user._id,
     bookingId: booking._id,
-    amount: finalAmount, // --- [MODIFIED] ---
+    amount: amountToPayNow, // Storing what is being paid/attempted now (Full or Advance)
     currency: 'INR',
     status: PAYMENT_STATUS.PENDING,
+    method: paymentMethod
   });
 
   await payment.save();
@@ -1119,6 +1120,7 @@ export const createBooking = catchAsync(async (req, res) => {
     bookingId: booking.bookingId,
     paymentId: payment._id,
     finalAmount,
+    amountToPayNow
   });
 
   // ========================================
@@ -1160,13 +1162,14 @@ export const createBooking = catchAsync(async (req, res) => {
     );
 
   } else {
-    // Online payment (Razorpay)
+    // Online payment (Razorpay) -> Create order for FULL or ADVANCE amount
     payment.method = PAYMENT_METHODS.RAZORPAY;
     const receiptId = `receipt_${booking.bookingId}`;
     const razorpayNotes = {
       bookingDbId: booking._id.toString(),
       bookingId: booking.bookingId,
       userId: req.user._id.toString(),
+      isAdvance: isAdvancePayment ? 'true' : 'false'
     };
 
     const razorpayOrder = await paymentService.createOrder(
@@ -1184,18 +1187,24 @@ export const createBooking = catchAsync(async (req, res) => {
       {
         razorpayKey: process.env.RAZORPAY_KEY_ID,
         orderId: razorpayOrder.id,
-        amount: razorpayOrder.amount,
+        amount: razorpayOrder.amount, // In paise
         currency: 'INR',
         bookingId: booking.bookingId,
         bookingDbId: booking._id,
         fareDetails: booking.fareDetails,
+        payNow: amountToPayNow, // Explicitly tell frontend what to charge
+        isAdvancePayment: !!isAdvancePayment, // Confirmation flag for UI
+        totalFare: finalAmount,
+        advancePercent: BOOKING_CONFIG.ADVANCE_PAYMENT_PERCENTAGE,
         prefill: {
           name: finalPassengerDetails.name,
           email: finalPassengerDetails.email,
           contact: finalPassengerDetails.phone,
         },
       },
-      'Booking order created. Please proceed to payment.',
+      isAdvancePayment
+        ? 'Booking order created for Advance Payment. Please proceed.'
+        : 'Booking order created for Full Payment. Please proceed.',
       200
     );
   }
@@ -1261,7 +1270,7 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
   const payment = booking.paymentId;
 
   // Idempotency check
-  if (payment.status === PAYMENT_STATUS.COMPLETED && booking.status === BOOKING_STATUS.CONFIRMED) {
+  if ((payment.status === PAYMENT_STATUS.COMPLETED || payment.status === PAYMENT_STATUS.ADVANCED) && booking.status === BOOKING_STATUS.CONFIRMED) {
     logger.warn('Attempt to verify an already processed booking', {
       bookingId: booking.bookingId,
       userId: req.user._id
@@ -1286,7 +1295,7 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
       paymentId: razorpay_payment_id
     });
 
-    if (payment.status === PAYMENT_STATUS.COMPLETED) {
+    if (payment.status === PAYMENT_STATUS.COMPLETED || payment.status === PAYMENT_STATUS.ADVANCED) {
       return sendSuccess(
         res,
         {
@@ -1336,13 +1345,26 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
     throw new BadRequestError('Invalid payment signature. Payment verification failed');
   }
 
-  // Signature is valid - Confirm booking
+  // --- [UPDATED STATUS LOGIC] ---
+  // Signature is valid - Determine Payment Status
+  const totalFare = booking.fareDetails.finalAmount;
+  const paidAmount = payment.amount;
+
+  // If paid amount is less than total fare (Advance Payment)
+  if (paidAmount < totalFare) {
+    payment.status = PAYMENT_STATUS.ADVANCED;
+    logger.info(`Payment verified as ADVANCED. Paid: ${paidAmount}, Total: ${totalFare}`);
+  } else {
+    payment.status = PAYMENT_STATUS.COMPLETED;
+    logger.info(`Payment verified as COMPLETED. Paid: ${paidAmount}, Total: ${totalFare}`);
+  }
+
+  // Booking is confirmed in either case (Full or Advance)
   booking.status = BOOKING_STATUS.CONFIRMED;
 
-  payment.status = PAYMENT_STATUS.COMPLETED;
   payment.razorpayPaymentId = razorpay_payment_id;
   payment.razorpaySignature = razorpay_signature;
-  payment.method = PAYMENT_METHODS.UPI;
+  payment.method = PAYMENT_METHODS.UPI; // Or specific method if available
 
   await payment.save();
   await booking.save();
@@ -1350,13 +1372,18 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
   logger.info('Payment verified and booking confirmed', {
     bookingId: booking.bookingId,
     paymentId: payment._id,
-    razorpayPaymentId: razorpay_payment_id
+    razorpayPaymentId: razorpay_payment_id,
+    status: payment.status
   });
 
   // Send notifications
+  const notifTitle = payment.status === PAYMENT_STATUS.ADVANCED
+    ? 'New Online Booking Confirmed (Advance Paid)'
+    : 'New Online Booking Confirmed (Full Paid)';
+
   notifyAdmin(
-    'New Online Booking Confirmed',
-    `Booking ${booking.bookingId} (${booking.bookingType}) from ${booking.pickupLocation.city} to ${booking.dropLocation.city} for ₹${booking.fareDetails.finalAmount} has been confirmed (Paid).`,
+    notifTitle,
+    `Booking ${booking.bookingId} (${booking.bookingType}) from ${booking.pickupLocation.city} to ${booking.dropLocation.city} confirmed. Total: ₹${totalFare}, Paid: ₹${paidAmount}, Status: ${payment.status}`,
     { bookingId: booking.bookingId, paymentId: razorpay_payment_id }
   ).catch(err => logger.error('Admin notification failed', { err: err.message }));
 
@@ -1365,7 +1392,7 @@ export const verifyBookingPayment = catchAsync(async (req, res) => {
     user,
     booking.bookingId,
     'confirmed',
-    `Your payment was successful! Booking ${booking.bookingId} is confirmed.`
+    `Your payment of ₹${paidAmount} was successful! Booking ${booking.bookingId} is confirmed.`
   );
 
   return sendSuccess(
@@ -1657,8 +1684,11 @@ export const cancelBooking = catchAsync(async (req, res) => {
   let refundAmount = 0;
   let refundNote = 'No refund applicable';
 
-  if (payment && payment.status === PAYMENT_STATUS.COMPLETED) {
-    refundAmount = Math.max(0, payment.amount - cancellationCharge);
+  if (payment && (payment.status === PAYMENT_STATUS.COMPLETED || payment.status === PAYMENT_STATUS.ADVANCED)) {
+    // If payment was an advance or full, check if paid amount covers cancellation
+    // Or refund paid amount minus cancellation charge
+    const paidAmount = payment.amount;
+    refundAmount = Math.max(0, paidAmount - cancellationCharge);
 
     if (refundAmount > 0) {
       try {
@@ -1688,7 +1718,7 @@ export const cancelBooking = catchAsync(async (req, res) => {
       }
     } else {
       refundNote = chargeApplied
-        ? `Cancellation charge of ₹${cancellationCharge} applies. No refund due`
+        ? `Cancellation charge of ₹${cancellationCharge} applies. No refund due as charge exceeds paid amount.`
         : 'Full cancellation charge applied. No refund due';
     }
 
