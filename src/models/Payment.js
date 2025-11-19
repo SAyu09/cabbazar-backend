@@ -1,3 +1,4 @@
+// src/models/Payment.js
 import mongoose from 'mongoose';
 import { PAYMENT_STATUS, PAYMENT_METHODS } from '../config/constants.js';
 import logger from '../config/logger.js';
@@ -76,4 +77,3 @@ paymentSchema.pre('save', function (next) {
 const Payment = mongoose.model('Payment', paymentSchema);
 
 export default Payment;
-
