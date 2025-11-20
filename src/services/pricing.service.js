@@ -306,7 +306,8 @@ class PricingService {
       const fareData = {
         vehicleType: normalizedVehicleType,
         bookingType: isRoundTrip ? BOOKING_TYPES.ROUND_TRIP : BOOKING_TYPES.ONE_WAY,
-        baseFare: Math.round(baseFare),
+        // --- [UPDATE] For Round Trip, Base Fare is equal to Final Amount as requested ---
+        baseFare: isRoundTrip ? finalAmount : Math.round(baseFare),
         distance: finalChargeableDistance,
         actualDistance: actualRoundTripDistance,
         numberOfDays: isRoundTrip ? numberOfDays : null,
