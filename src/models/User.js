@@ -9,7 +9,7 @@ const userSchema = new mongoose.Schema({
     unique: true,
     trim: true,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         // Remove any spaces, hyphens, or plus signs
         const cleaned = v.replace(/[\s\-+]/g, '');
         // Check if it's a valid Indian number (with or without country code)
@@ -75,6 +75,11 @@ const userSchema = new mongoose.Schema({
   lastLogin: {
     type: Date
   },
+  // --- [NEW FIELD] ---
+  includeTolls: {
+    type: Boolean,
+    default: false
+  },
   fcmToken: String,
   deviceInfo: [{
     deviceId: String,
@@ -94,56 +99,39 @@ userSchema.index({ isActive: 1, isVerified: 1 });
 userSchema.index({ createdAt: -1 });
 
 // Virtuals
-userSchema.virtual('fullName').get(function() {
+userSchema.virtual('fullName').get(function () {
   return this.name || 'User';
 });
 
-userSchema.virtual('maskedPhone').get(function() {
+userSchema.virtual('maskedPhone').get(function () {
   if (!this.phoneNumber) return '';
   return 'XXXXXX' + this.phoneNumber.slice(-4);
 });
 
 // Instance Methods
-userSchema.methods.getJWTToken = function() {
+userSchema.methods.getJWTToken = function () {
   return jwt.sign(
-    { id: this._id }, 
+    { id: this._id },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRE || '30d' }
   );
 };
 
-userSchema.methods.updateLastLogin = function() {
+userSchema.methods.updateLastLogin = function () {
   this.lastLogin = new Date();
   return this.save({ validateBeforeSave: false });
 };
 
-// userSchema.methods.addDevice = function(deviceInfo) {
-//   const existingDevice = this.deviceInfo.find(d => d.deviceId === deviceInfo.deviceId);
-
-//   if (existingDevice) {
-//     existingDevice.lastUsed = new Date();
-//     existingDevice.fcmToken = deviceInfo.fcmToken || existingDevice.fcmToken;
-//   } else {
-//     this.deviceInfo.push({
-//       ...deviceInfo,
-//       lastUsed: new Date()
-//     }
-//   );
-//   }
-
-//   return this.save({ validateBeforeSave: false });
-// };
-
 // Static Methods
-userSchema.statics.findByPhoneNumber = function(phoneNumber) {
+userSchema.statics.findByPhoneNumber = function (phoneNumber) {
   return this.findOne({ phoneNumber });
 };
 
-userSchema.statics.findVerified = function() {
+userSchema.statics.findVerified = function () {
   return this.find({ isVerified: true, isActive: true });
 };
 
-userSchema.statics.countActive = function() {
+userSchema.statics.countActive = function () {
   return this.countDocuments({ isActive: true });
 };
 
