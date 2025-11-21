@@ -29,10 +29,10 @@ app.use(cookieParser());
 // Changing 'origin' to '*' allows your mobile app (and any other domain)
 // to send requests to your server. This should fix the "Network Error".
 app.use(cors({
-  origin: '*', // Allows all origins
+  origin: "*",
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  allowedHeaders: ["Origin", "Content-Type", "Accept", "Authorization"],
 }));
 // --- [END FIX] ---
 

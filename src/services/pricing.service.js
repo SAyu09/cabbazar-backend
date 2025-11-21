@@ -274,7 +274,15 @@ class PricingService {
         stateTax = OUTSTATION_SURCHARGES[statePermitKey] || OUTSTATION_SURCHARGES.DEFAULT_STATE_PERMIT_FEE || 450;
       }
 
-      const subtotal = baseFare + nightCharges + tollCharges + stateTax;
+      // --- [UPDATE 1] If includeTolls is true, add tollCharges to baseFare ---
+      if (includeTolls) {
+        baseFare += tollCharges;
+      }
+
+      // --- [UPDATE 2] Calculate Subtotal ---
+      // baseFare now includes tollCharges (if applicable), so we only add nightCharges and stateTax
+      const subtotal = baseFare + nightCharges + stateTax;
+
       const gst = calculateGST(subtotal, TAX_CONFIG.GST_RATE);
       const totalFare = subtotal;
       const finalAmount = Math.round(subtotal + gst);
@@ -306,7 +314,7 @@ class PricingService {
       const fareData = {
         vehicleType: normalizedVehicleType,
         bookingType: isRoundTrip ? BOOKING_TYPES.ROUND_TRIP : BOOKING_TYPES.ONE_WAY,
-        // --- [UPDATE] For Round Trip, Base Fare is equal to Final Amount as requested ---
+        // --- [UPDATE 3] For Round Trip, Base Fare presented is equal to Final Amount ---
         baseFare: isRoundTrip ? finalAmount : Math.round(baseFare),
         distance: finalChargeableDistance,
         actualDistance: actualRoundTripDistance,
@@ -321,8 +329,8 @@ class PricingService {
         gstRate: `${TAX_CONFIG.GST_RATE * 100}%`,
         totalFare: Math.round(totalFare),
         finalAmount: finalAmount,
-        advanceAmount,   // --- [NEW] Present in Search Response
-        remainingAmount, // --- [NEW]
+        advanceAmount,
+        remainingAmount,
         perKmRate: perKmRate,
         minFareApplied,
         minDailyKmApplied,

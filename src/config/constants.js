@@ -356,9 +356,9 @@ export const OUTSTATION_SURCHARGES = {
 
 // ADD-ON SERVICES
 export const ADD_ON_SERVICES = {
-  LUGGAGE: { name: 'Assured luggage space', price: 105 },
+  LUGGAGE: { name: 'Assured luggage space', price: 495 },
   PET: { name: 'Pet Allowed', price: 840 },
-  REFUNDABLE: { name: 'Upgrade to Refundable booking', price: 58 },
+  REFUNDABLE: { name: 'Upgrade to Refundable booking', price: 99 },
   NEW_CAR: { name: 'Confirmed Car Model 2022 or above', price: 420 },
   DRIVER_LANG: { name: 'Preferred Driver language', price: 315 }
 };
