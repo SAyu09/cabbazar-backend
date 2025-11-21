@@ -653,6 +653,13 @@ export const searchCabs = catchAsync(async (req, res) => {
   const tripDate = validateDateTime(date || startDateTime || Date.now());
   const tripEndDate = endDateTime ? new Date(endDateTime) : null;
 
+  // Update user preference for toll inclusion
+  if (req.user) {
+    req.user.includeTolls = includeTolls === true;
+    await req.user.save({ validateBeforeSave: false });
+    logger.info('Updated user toll preference', { userId: req.user._id, includeTolls });
+  }
+console.log(req.user);
   if (tripEndDate && isNaN(tripEndDate.getTime())) {
     throw new BadRequestError('Invalid return date (endDateTime) format');
   }
@@ -916,55 +923,50 @@ export const createBooking = catchAsync(async (req, res) => {
     specialRequests,
     notes,
     searchId,
-    distance, // One-way distance from search
+    distance,
     paymentMethod = PAYMENT_METHODS.RAZORPAY,
     addOnCodes,
-    includeTolls, // *** CRITICAL: Must be passed from client ***
     isAdvancePayment
   } = req.body;
 
-  // 1. Validate booking type
-  validateBookingType(bookingType);
+  // 1. GET 'includeTolls' FROM LOGGED-IN USER
+  // Since route is protected, req.user is populated with latest DB data
+  // This retrieves the value saved during the search step
+  const effectiveIncludeTolls = req.user.includeTolls === true;
+  logger.info('Using toll preference from User profile', {
+    userId: req.user._id,
+    effectiveIncludeTolls
+  });
 
-  // 2. Validate locations
+  // 2. VALIDATE INPUTS
+  validateBookingType(bookingType);
   validateLocation(pickupLocation, 'pickupLocation');
+
   const isLocalRental = LOCAL_RENTAL_TYPES.includes(bookingType);
   if (!isLocalRental) {
     validateLocation(dropLocation, 'dropLocation');
   }
 
-  // 3. Validate vehicle type
   validateVehicleType(vehicleType);
 
-  // 4. Validate date/time
   const tripDate = validateDateTime(startDateTime);
   let tripEndDate = null;
   if (endDateTime) {
     tripEndDate = new Date(endDateTime);
-    if (isNaN(tripEndDate.getTime())) {
-      throw new BadRequestError('Invalid end date/time format');
-    }
-    if (tripEndDate <= tripDate) {
-      throw new BadRequestError('End date/time must be after start date/time');
+    if (isNaN(tripEndDate.getTime()) || tripEndDate <= tripDate) {
+      throw new BadRequestError('End date/time must be valid and after start date/time');
     }
   }
   const finalEndDateTime = (bookingType === BOOKING_TYPES.ROUND_TRIP) ? tripEndDate : null;
 
-  // 5. Validate passenger details
   const finalPassengerDetails = validatePassengerDetails(passengerDetails, req.user);
+  const { total: addOnsTotal, services: selectedAddOns } = validateAddOnServices(addOnCodes);
 
-  // 6. Validate add-on services
-  const addOnsValidation = validateAddOnServices(addOnCodes);
-  const { total: addOnsTotal, services: selectedAddOns } = addOnsValidation;
-
-  // 7. Validate payment method
   if (!Object.values(PAYMENT_METHODS).includes(paymentMethod)) {
     throw new BadRequestError(`Invalid payment method: ${paymentMethod}`);
   }
 
-  // ========================================
-  // 8. SERVER-SIDE FARE CALCULATION - CRITICAL FIX
-  // ========================================
+  // 3. SERVER-SIDE FARE CALCULATION
   let estimatedDistance = distance;
   let finalFareDetails;
   let finalAmount;
@@ -973,7 +975,6 @@ export const createBooking = catchAsync(async (req, res) => {
     if (isLocalRental) {
       estimatedDistance = 0;
     } else if (!estimatedDistance || typeof estimatedDistance !== 'number' || estimatedDistance <= 0) {
-      // Recalculate if client didn't provide distance
       logger.warn('Distance not provided. Recalculating...', { bookingType });
 
       const origin = pickupLocation.lat && pickupLocation.lng
@@ -988,12 +989,12 @@ export const createBooking = catchAsync(async (req, res) => {
       estimatedDistance = distanceResult.distance;
     }
 
-    // *** CRITICAL FIX: Pass includeTolls to pricing service ***
+    // *** PASS effectiveIncludeTolls TO PRICING SERVICE ***
     const options = pricingService.getVehicleOptions(bookingType, {
       distance: estimatedDistance || 0,
       startDateTime: tripDate,
       endDateTime: finalEndDateTime,
-      includeTolls: includeTolls === true // Ensure boolean, default to false
+      includeTolls: effectiveIncludeTolls // <--- Value from User model
     });
 
     const baseFareDetails = options.find(opt => opt.vehicleType === vehicleType)?.fareDetails;
@@ -1002,54 +1003,29 @@ export const createBooking = catchAsync(async (req, res) => {
       throw new BadRequestError(`No pricing found for ${vehicleType} on this route.`);
     }
 
-    logger.info('Base fare calculated', {
-      vehicleType,
-      bookingType,
-      distance: estimatedDistance,
-      includeTolls: includeTolls === true,
-      baseFare: baseFareDetails.baseFare,
-      finalAmount: baseFareDetails.finalAmount
-    });
+    // Combine base fare with add-ons
+    const newSubtotal = baseFareDetails.subtotal + addOnsTotal;
+    const newGst = calculateGST(newSubtotal, TAX_CONFIG.GST_RATE);
+    const calculatedFinalAmount = Math.round(newSubtotal + newGst);
 
-    // Apply add-ons if any
-    if (addOnsTotal > 0) {
-      const newSubtotal = baseFareDetails.subtotal + addOnsTotal;
-      const newGst = calculateGST(newSubtotal, TAX_CONFIG.GST_RATE);
-      const calculatedFinalAmount = Math.round(newSubtotal + newGst);
+    // Recalculate advance with add-ons included
+    const { advanceAmount, remainingAmount } = pricingService.calculateAdvance(calculatedFinalAmount);
 
-      // Recalculate advance with add-ons
-      const { advanceAmount, remainingAmount } = pricingService.calculateAdvance(calculatedFinalAmount);
-
-      finalFareDetails = {
-        ...baseFareDetails,
-        addOnsTotal: Math.round(addOnsTotal),
-        subtotal: Math.round(newSubtotal),
-        gst: Math.round(newGst),
-        totalFare: Math.round(newSubtotal),
-        finalAmount: calculatedFinalAmount,
-        advanceAmount,
-        remainingAmount
-      };
-
-      logger.info('Add-ons applied to fare', {
-        addOnsTotal,
-        newFinalAmount: calculatedFinalAmount
-      });
-    } else {
-      // No add-ons, use base fare as-is
-      finalFareDetails = baseFareDetails;
-    }
+    finalFareDetails = {
+      ...baseFareDetails,
+      addOnsTotal: Math.round(addOnsTotal),
+      subtotal: Math.round(newSubtotal),
+      gst: Math.round(newGst),
+      totalFare: Math.round(newSubtotal),
+      finalAmount: calculatedFinalAmount,
+      advanceAmount,
+      remainingAmount
+    };
 
     finalAmount = finalFareDetails.finalAmount;
 
   } catch (error) {
-    logger.error('Server-side fare calculation failed', {
-      error: error.message,
-      bookingType,
-      vehicleType,
-      distance: estimatedDistance,
-      includeTolls
-    });
+    logger.error('Server-side fare calculation failed', { error: error.message });
     throw new BadRequestError(`Could not calculate fare: ${error.message}`);
   }
 
@@ -1057,26 +1033,16 @@ export const createBooking = catchAsync(async (req, res) => {
     throw new BadRequestError('Calculated fare is zero or negative. Cannot proceed');
   }
 
-  // ========================================
-  // 9. DETERMINE AMOUNT TO PAY NOW
-  // ========================================
-  let amountToPayNow = finalAmount; // Default: Full Amount
+  // 4. DETERMINE AMOUNT TO PAY NOW
+  let amountToPayNow = finalFareDetails.finalAmount; // Default: Full Amount
 
   if (paymentMethod === PAYMENT_METHODS.RAZORPAY && isAdvancePayment === true) {
-    // Advance payment requested
     amountToPayNow = finalFareDetails.advanceAmount;
-    logger.info('Advance payment requested', {
-      bookingId: searchId,
-      advance: amountToPayNow,
-      total: finalAmount
-    });
+    logger.info('Processing Advance Payment Request', { bookingId: searchId, amount: amountToPayNow });
   } else if (paymentMethod === PAYMENT_METHODS.RAZORPAY) {
-    // Full payment (use finalAmount, not baseFare)
-    amountToPayNow = finalAmount;
-    logger.info('Full payment requested', {
-      bookingId: searchId,
-      amount: amountToPayNow
-    });
+    // Full Payment requested
+    amountToPayNow = finalFareDetails.finalAmount;
+    logger.info('Processing Full Payment Request', { bookingId: searchId, amount: amountToPayNow });
   }
 
   const amountInPaise = Math.round(amountToPayNow * 100);
@@ -1092,16 +1058,12 @@ export const createBooking = catchAsync(async (req, res) => {
     : [];
 
   const validSpecialRequests = Array.isArray(specialRequests)
-    ? specialRequests
-      .filter(req => typeof req === 'string' && req.trim().length > 0)
-      .map(req => req.trim().substring(0, 200))
+    ? specialRequests.filter(req => typeof req === 'string' && req.trim().length > 0).map(req => req.trim().substring(0, 200))
     : [];
 
   const validNotes = notes && typeof notes === 'string' ? notes.trim().substring(0, 500) : null;
 
-  // ========================================
-  // 10. CREATE BOOKING & PAYMENT DOCS
-  // ========================================
+  // 5. CREATE BOOKING & PAYMENT DOCS
   const booking = new Booking({
     userId: req.user._id,
     bookingType,
@@ -1141,17 +1103,14 @@ export const createBooking = catchAsync(async (req, res) => {
   booking.paymentId = payment._id;
   await booking.save();
 
-  logger.info('Booking & payment created', {
+  logger.info('Pending booking & payment docs created', {
     bookingId: booking.bookingId,
     paymentId: payment._id,
     finalAmount,
-    amountToPayNow,
-    includeTolls: includeTolls === true
+    amountToPayNow
   });
 
-  // ========================================
-  // 11. HANDLE PAYMENT METHOD
-  // ========================================
+  // 6. HANDLE PAYMENT METHOD
   if (paymentMethod === PAYMENT_METHODS.CASH) {
     payment.method = PAYMENT_METHODS.CASH;
     booking.status = BOOKING_STATUS.CONFIRMED;
@@ -1159,9 +1118,20 @@ export const createBooking = catchAsync(async (req, res) => {
     await payment.save();
     await booking.save();
 
-    logger.info('Cash booking confirmed', { bookingId: booking.bookingId });
+    logger.info('Booking confirmed with CASH', { bookingId: booking.bookingId });
 
-    // Notifications omitted for brevity (keep your existing notification code)
+    notifyAdmin(
+      'New Cash Booking Confirmed',
+      `Booking ${booking.bookingId} confirmed for ₹${booking.fareDetails.finalAmount}`
+    ).catch(err => { });
+
+    const user = await User.findById(req.user._id).select('deviceInfo');
+    await notifyUser(
+      user,
+      booking.bookingId,
+      'confirmed',
+      `Your cash booking ${booking.bookingId} is confirmed.`
+    );
 
     return sendSuccess(
       res,
@@ -1195,19 +1165,12 @@ export const createBooking = catchAsync(async (req, res) => {
     payment.receiptId = receiptId;
     await payment.save();
 
-    logger.info('Razorpay order created', {
-      bookingId: booking.bookingId,
-      orderId: razorpayOrder.id,
-      amount: amountToPayNow,
-      isAdvance: !!isAdvancePayment
-    });
-
     return sendSuccess(
       res,
       {
         razorpayKey: process.env.RAZORPAY_KEY_ID,
         orderId: razorpayOrder.id,
-        amount: razorpayOrder.amount,
+        amount: razorpayOrder.amount, // In paise
         currency: 'INR',
         bookingId: booking.bookingId,
         bookingDbId: booking._id,
@@ -1223,12 +1186,13 @@ export const createBooking = catchAsync(async (req, res) => {
         },
       },
       isAdvancePayment
-        ? 'Booking order created for Advance Payment. Please proceed.'
-        : 'Booking order created for Full Payment. Please proceed.',
+        ? 'Booking order created for Advance Payment.'
+        : 'Booking order created for Full Payment.',
       200
     );
   }
 });
+
 
 
 // ========================================

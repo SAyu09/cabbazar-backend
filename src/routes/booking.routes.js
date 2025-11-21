@@ -186,7 +186,7 @@ const cancelReasonValidation = [
  * @desc    Search for available cabs
  * @access  Public
  */
-router.post('/search', bookingController.searchCabs);
+router.post('/search', protect, bookingController.searchCabs);
 /**
  * @route   POST /api/bookings/estimate-fare
  * @desc    Estimate fare for a trip
