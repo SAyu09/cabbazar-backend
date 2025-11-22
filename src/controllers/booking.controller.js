@@ -659,7 +659,7 @@ export const searchCabs = catchAsync(async (req, res) => {
     await req.user.save({ validateBeforeSave: false });
     logger.info('Updated user toll preference', { userId: req.user._id, includeTolls });
   }
-console.log(req.user);
+
   if (tripEndDate && isNaN(tripEndDate.getTime())) {
     throw new BadRequestError('Invalid return date (endDateTime) format');
   }
@@ -937,7 +937,7 @@ export const createBooking = catchAsync(async (req, res) => {
     userId: req.user._id,
     effectiveIncludeTolls
   });
-
+  console.log("----------", effectiveIncludeTolls);
   // 2. VALIDATE INPUTS
   validateBookingType(bookingType);
   validateLocation(pickupLocation, 'pickupLocation');
@@ -1041,7 +1041,7 @@ export const createBooking = catchAsync(async (req, res) => {
     logger.info('Processing Advance Payment Request', { bookingId: searchId, amount: amountToPayNow });
   } else if (paymentMethod === PAYMENT_METHODS.RAZORPAY) {
     // Full Payment requested
-    amountToPayNow = finalFareDetails.finalAmount;
+    amountToPayNow = finalFareDetails.baseFare;
     logger.info('Processing Full Payment Request', { bookingId: searchId, amount: amountToPayNow });
   }
 
