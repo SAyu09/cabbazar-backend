@@ -406,7 +406,9 @@ class PricingService {
 
       const fareData = {
         vehicleType: normalizedVehicleType,
-        bookingType: BOOKING_TYPES.LOCAL_8_80, // Placeholder, adjusts in loop
+        // --- [FIX START] Dynamically set bookingType based on packageType ---
+        bookingType: `LOCAL_${packageType}`,
+        // --- [FIX END] ---
         packageType,
         baseFare,
         packageDetails: { hours: pkg.hours, km: pkg.km, description: `${pkg.hours} hours / ${pkg.km} km package` },
