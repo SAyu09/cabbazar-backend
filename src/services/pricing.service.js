@@ -213,10 +213,23 @@ class PricingService {
           if (end < start) end = start;
         }
 
-        // Calculate days based on 24-hour blocks
-        const diffTime = Math.abs(end - start);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        // --- FIXED: Calendar Day Calculation (Inclusive) ---
+        // 1. Reset time to midnight to count calendar dates only
+        const startDateOnly = new Date(start);
+        startDateOnly.setHours(0, 0, 0, 0);
+
+        const endDateOnly = new Date(end);
+        endDateOnly.setHours(0, 0, 0, 0);
+
+        // 2. Calculate time difference between dates
+        const diffTime = endDateOnly.getTime() - startDateOnly.getTime();
+
+        // 3. Convert to days and ADD 1 to include the start date
+        // e.g. 30 Nov to 3 Dec = 4 Days (30, 1, 2, 3)
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
         numberOfDays = diffDays > 0 ? diffDays : 1;
+        // --- END FIXED LOGIC ---
 
         // Actual distance (e.g. 231.2 * 2 = 462.4)
         actualRoundTripDistance = Math.round(validDistance * 2 * 10) / 10;
