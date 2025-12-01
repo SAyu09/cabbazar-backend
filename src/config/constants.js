@@ -346,7 +346,7 @@ export const TAX_CONFIG = {
 
 // Outstation Surcharges (Estimates)
 export const OUTSTATION_SURCHARGES = {
-  TOLL_PER_KM: 1.5, // Estimated ₹1.5 per km for tolls
+  TOLL_PER_KM: 3, 
   STATE_PERMIT_HATCHBACK: 300,
   STATE_PERMIT_SEDAN: 400,
   STATE_PERMIT_SUV: 500,
