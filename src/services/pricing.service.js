@@ -1,4 +1,4 @@
-// src/services/pricing.service.js - Logic with Min 250km/day Rule & Advance Payment
+// src/services/pricing.service.js - Updated with Driver Allowance Logic
 import {
   PRICING,
   LOCAL_PACKAGES,
@@ -18,6 +18,8 @@ import logger from '../config/logger.js';
 
 // Minimum chargeable distance per day for outstation round trips
 const MIN_OUTSTATION_KM_PER_DAY = 250;
+// Driver Allowance per day (New Addition)
+const DRIVER_ALLOWANCE_PER_DAY = 300;
 
 class PricingService {
   constructor() {
@@ -202,6 +204,7 @@ class PricingService {
       let breakdownCalculation = '';
       let minDailyKmApplied = false;
       let actualRoundTripDistance = validDistance;
+      let driverAllowance = 0; // Initialize driver allowance
 
       // --- [ROUND TRIP LOGIC START] ---
       if (isRoundTrip) {
@@ -214,22 +217,21 @@ class PricingService {
         }
 
         // --- FIXED: Calendar Day Calculation (Inclusive) ---
-        // 1. Reset time to midnight to count calendar dates only
         const startDateOnly = new Date(start);
         startDateOnly.setHours(0, 0, 0, 0);
-
+        
         const endDateOnly = new Date(end);
         endDateOnly.setHours(0, 0, 0, 0);
 
-        // 2. Calculate time difference between dates
         const diffTime = endDateOnly.getTime() - startDateOnly.getTime();
-
-        // 3. Convert to days and ADD 1 to include the start date
-        // e.g. 30 Nov to 3 Dec = 4 Days (30, 1, 2, 3)
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-
+        
         numberOfDays = diffDays > 0 ? diffDays : 1;
         // --- END FIXED LOGIC ---
+
+        // --- [NEW] Calculate Driver Allowance ---
+        driverAllowance = numberOfDays * DRIVER_ALLOWANCE_PER_DAY;
+        // --------------------------------------
 
         // Actual distance (e.g. 231.2 * 2 = 462.4)
         actualRoundTripDistance = Math.round(validDistance * 2 * 10) / 10;
@@ -287,14 +289,13 @@ class PricingService {
         stateTax = OUTSTATION_SURCHARGES[statePermitKey] || OUTSTATION_SURCHARGES.DEFAULT_STATE_PERMIT_FEE || 450;
       }
 
-      // --- [UPDATE 1] If includeTolls is true, add tollCharges to baseFare ---
+      // If includeTolls is true, add tollCharges to baseFare
       if (includeTolls) {
         baseFare += tollCharges;
       }
 
-      // --- [UPDATE 2] Calculate Subtotal ---
-      // baseFare now includes tollCharges (if applicable), so we only add nightCharges and stateTax
-      const subtotal = baseFare + nightCharges + stateTax;
+      // --- [UPDATED] Calculate Subtotal with Driver Allowance ---
+      const subtotal = baseFare + nightCharges + stateTax + driverAllowance;
 
       const gst = calculateGST(subtotal, TAX_CONFIG.GST_RATE);
       const totalFare = subtotal;
@@ -327,7 +328,6 @@ class PricingService {
       const fareData = {
         vehicleType: normalizedVehicleType,
         bookingType: isRoundTrip ? BOOKING_TYPES.ROUND_TRIP : BOOKING_TYPES.ONE_WAY,
-        // --- [UPDATE 3] For Round Trip, Base Fare presented is equal to Final Amount ---
         baseFare: isRoundTrip ? finalAmount : Math.round(baseFare),
         distance: finalChargeableDistance,
         actualDistance: actualRoundTripDistance,
@@ -336,6 +336,9 @@ class PricingService {
         nightCharges: Math.round(nightCharges),
         tollCharges: Math.round(tollCharges),
         stateTax: Math.round(stateTax),
+        // --- [NEW FIELD] ---
+        driverAllowance: Math.round(driverAllowance),
+        // -------------------
         isNightTime: isNight,
         subtotal: Math.round(subtotal),
         gst: Math.round(gst),
@@ -356,6 +359,9 @@ class PricingService {
           nightCharges: nightCharges > 0 ? `Night charges (${((rates.nightChargeMultiplier || 1.2) - 1) * 100}%) = ₹${Math.round(nightCharges)}` : null,
           tollCharges: tollCharges > 0 ? `Toll charges (Est.) = ₹${Math.round(tollCharges)}` : null,
           stateTax: stateTax > 0 ? `State permit charges (Est.) = ₹${Math.round(stateTax)}` : null,
+          // --- [NEW BREAKDOWN ITEM] ---
+          driverAllowance: driverAllowance > 0 ? `Driver Allowance (${numberOfDays} Days × ₹${DRIVER_ALLOWANCE_PER_DAY}) = ₹${Math.round(driverAllowance)}` : null,
+          // ----------------------------
           gst: `GST (${TAX_CONFIG.GST_RATE * 100}%) = ₹${Math.round(gst)}`,
           total: `Total Amount = ₹${Math.round(finalAmount)}`,
           advance: `Advance to Pay Now (20%) = ₹${advanceAmount}`,
@@ -419,9 +425,7 @@ class PricingService {
 
       const fareData = {
         vehicleType: normalizedVehicleType,
-        // --- [FIX START] Dynamically set bookingType based on packageType ---
         bookingType: `LOCAL_${packageType}`,
-        // --- [FIX END] ---
         packageType,
         baseFare,
         packageDetails: { hours: pkg.hours, km: pkg.km, description: `${pkg.hours} hours / ${pkg.km} km package` },
@@ -436,8 +440,8 @@ class PricingService {
         gstRate: `${TAX_CONFIG.GST_RATE * 100}%`,
         totalFare: subtotal,
         finalAmount,
-        advanceAmount,   // --- [NEW]
-        remainingAmount, // --- [NEW]
+        advanceAmount,
+        remainingAmount,
         extraKmRate,
         extraHourRate,
         validUntil: new Date(Date.now() + 60 * 60 * 1000),
@@ -513,8 +517,8 @@ class PricingService {
         gstRate: `${TAX_CONFIG.GST_RATE * 100}%`,
         totalFare: Math.round(subtotal),
         finalAmount,
-        advanceAmount,   // --- [NEW]
-        remainingAmount, // --- [NEW]
+        advanceAmount,
+        remainingAmount,
         perKmRate: perKmRate,
         estimatedTravelTime: `${estimatedMinutes} minutes`,
         validUntil: new Date(Date.now() + 60 * 60 * 1000),
